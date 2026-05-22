@@ -206,6 +206,14 @@
     transition: transform 0.1s;
   }
   .draw-btn:active { transform: translateX(-50%) scale(0.97); }
+  .draw-btn.disabled {
+    background: linear-gradient(180deg, #b0a090, #8a7a6a);
+    color: #ddd;
+    border-color: #666;
+    cursor: not-allowed;
+    box-shadow: none;
+    pointer-events: none;
+  }
   .draw-btn .label { font-size: 16px; font-weight: bold; }
   .draw-btn .cost {
     display: flex; align-items: center; justify-content: center;
@@ -261,6 +269,26 @@
     left: 100px; bottom: 20px;
     color: rgba(255,255,255,0.7);
     font-size: 12px; z-index: 5;
+  }
+
+  /* 重置按钮 */
+  .reset-btn {
+    position: absolute;
+    left: 100px; bottom: 50px;
+    background: rgba(0,0,0,0.4);
+    color: rgba(255,255,255,0.7);
+    border: 1px solid rgba(255,255,255,0.25);
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    cursor: pointer;
+    z-index: 6;
+    transition: all 0.2s;
+  }
+  .reset-btn:hover {
+    background: rgba(220,80,60,0.4);
+    color: #fff;
+    border-color: rgba(255,150,150,0.5);
   }
 
   /* 棋盘弹窗 */
@@ -640,8 +668,13 @@
   <div class="board-mini" id="boardMini"></div>
   <div class="mini-hint">点击查看棋盘</div>
 
+  <!-- 重置按钮 -->
+  <div class="reset-btn" id="resetBtn" title="重置全部进度">
+    ↻ 重置
+  </div>
+
   <div class="progress-info">
-    本轮: 第 <span id="curN">0</span>/13 抽 ｜ 已点 <span id="progressText">0/16</span> ｜ 累积花费 ⭐<span id="cumCost">0</span> ｜ 完成连线 <span id="lineCount">0</span>
+    第 <span id="curRound">1</span>/2 轮 ｜ 第 <span id="curN">0</span>/13 抽 ｜ 已点 <span id="progressText">0/16</span> ｜ 累积花费 ⭐<span id="cumCost">0</span> ｜ 完成连线 <span id="lineCount">0</span>
   </div>
 
   <!-- 棋盘弹窗（抽奖发生在这里） -->
@@ -698,31 +731,40 @@
 </div>
 
 <script>
-/* ============ 数值表 ============ */
-const TABLE = [
-  { n:1,  cost:0,   gift:0,  coupon:0, actual:0,   cumCost:0,   line:0,    cum:0,     p480:0,     p680:0    },
-  { n:2,  cost:10,  gift:7,  coupon:1, actual:0,   cumCost:0,   line:0,    cum:0,     p480:0,     p680:0    },
-  { n:3,  cost:20,  gift:11, coupon:3, actual:0,   cumCost:0,   line:0,    cum:0,     p480:0,     p680:0    },
-  { n:4,  cost:30,  gift:2,  coupon:1, actual:25,  cumCost:25,  line:0.53, cum:0.53,  p480:100,   p680:0    },
-  { n:5,  cost:40,  gift:0,  coupon:0, actual:40,  cumCost:65,  line:0.85, cum:1.38,  p480:94.5,  p680:5.5  },
-  { n:6,  cost:50,  gift:0,  coupon:0, actual:50,  cumCost:115, line:1.37, cum:2.75,  p480:92.33, p680:7.67 },
-  { n:7,  cost:60,  gift:0,  coupon:0, actual:60,  cumCost:175, line:2.20, cum:4.95,  p480:90.17, p680:9.83 },
-  { n:8,  cost:70,  gift:0,  coupon:0, actual:70,  cumCost:245, line:3.54, cum:8.49,  p480:88.0,  p680:12.0 },
-  { n:9,  cost:80,  gift:0,  coupon:0, actual:80,  cumCost:325, line:5.70, cum:14.18, p480:84.17, p680:15.83 },
-  { n:10, cost:90,  gift:0,  coupon:0, actual:90,  cumCost:415, line:9.17, cum:23.35, p480:80.33, p680:19.67 },
-  { n:11, cost:100, gift:0,  coupon:0, actual:100, cumCost:515, line:14.75,cum:38.09, p480:76.5,  p680:23.5 },
-  { n:12, cost:110, gift:0,  coupon:0, actual:110, cumCost:625, line:23.73,cum:61.82, p480:76.5,  p680:23.5 },
-  { n:13, cost:120, gift:0,  coupon:0, actual:120, cumCost:745, line:38.18,cum:100,   p480:0,     p680:100  }
+/* ============ 数值表（两轮） ============ */
+const TABLE_R1 = [
+  { n:1,  cost:0,   gift:0,  coupon:0, actual:0,   cumCost:0,   line:0,    cum:0,     pA:0,    pB:0    },
+  { n:2,  cost:10,  gift:7,  coupon:1, actual:0,   cumCost:0,   line:0,    cum:0,     pA:0,    pB:0    },
+  { n:3,  cost:20,  gift:11, coupon:3, actual:0,   cumCost:0,   line:0,    cum:0,     pA:0,    pB:0    },
+  { n:4,  cost:30,  gift:2,  coupon:1, actual:25,  cumCost:25,  line:0.53, cum:0.53,  pA:100,  pB:0    },
+  { n:5,  cost:40,  gift:0,  coupon:0, actual:40,  cumCost:65,  line:0.85, cum:1.38,  pA:94.5, pB:5.5  },
+  { n:6,  cost:50,  gift:0,  coupon:0, actual:50,  cumCost:115, line:1.37, cum:2.75,  pA:92.33,pB:7.67 },
+  { n:7,  cost:60,  gift:0,  coupon:0, actual:60,  cumCost:175, line:2.20, cum:4.95,  pA:90.17,pB:9.83 },
+  { n:8,  cost:70,  gift:0,  coupon:0, actual:70,  cumCost:245, line:3.54, cum:8.49,  pA:88.0, pB:12.0 },
+  { n:9,  cost:80,  gift:0,  coupon:0, actual:80,  cumCost:325, line:5.70, cum:14.18, pA:84.17,pB:15.83},
+  { n:10, cost:90,  gift:0,  coupon:0, actual:90,  cumCost:415, line:9.17, cum:23.35, pA:80.33,pB:19.67},
+  { n:11, cost:100, gift:0,  coupon:0, actual:100, cumCost:515, line:14.75,cum:38.09, pA:76.5, pB:23.5 },
+  { n:12, cost:110, gift:0,  coupon:0, actual:110, cumCost:625, line:23.73,cum:61.82, pA:76.5, pB:23.5 },
+  { n:13, cost:120, gift:0,  coupon:0, actual:120, cumCost:745, line:38.18,cum:100,   pA:0,    pB:100  }
 ];
-const row = (n) => TABLE[n - 1];
-
-// 第 n 抽（n>=4）的条件成线概率（基于累积概率反推）
-function condLineProb(n) {
-  if (n <= 3) return 0;
-  if (n >= 13) return 1;
-  const cumPrev = row(n - 1).cum / 100;
-  return Math.max(0, Math.min(1, row(n).line / 100 / Math.max(1e-9, 1 - cumPrev)));
-}
+// 第二轮：前 6 抽都不花钱（赠送代币 + 折扣券抵扣），第 6 抽起开始计入累积花费
+const TABLE_R2 = [
+  { n:1,  cost:0,   gift:0,  coupon:0, actual:0,   cumCost:0,   line:0,    cum:0,     pA:50, pB:50 },
+  { n:2,  cost:10,  gift:7,  coupon:1, actual:0,   cumCost:0,   line:0,    cum:0,     pA:50, pB:50 },
+  { n:3,  cost:20,  gift:14, coupon:2, actual:0,   cumCost:0,   line:0,    cum:0,     pA:50, pB:50 },
+  { n:4,  cost:30,  gift:15, coupon:5, actual:0,   cumCost:0,   line:0.53, cum:0.53,  pA:50, pB:50 },
+  { n:5,  cost:40,  gift:22, coupon:6, actual:0,   cumCost:0,   line:0.85, cum:1.38,  pA:50, pB:50 },
+  { n:6,  cost:50,  gift:22, coupon:1, actual:25,  cumCost:25,  line:1.37, cum:2.75,  pA:50, pB:50 },
+  { n:7,  cost:60,  gift:0,  coupon:0, actual:60,  cumCost:85,  line:2.20, cum:4.95,  pA:50, pB:50 },
+  { n:8,  cost:70,  gift:0,  coupon:0, actual:70,  cumCost:155, line:3.54, cum:8.49,  pA:50, pB:50 },
+  { n:9,  cost:80,  gift:0,  coupon:0, actual:80,  cumCost:235, line:5.70, cum:14.18, pA:50, pB:50 },
+  { n:10, cost:90,  gift:0,  coupon:0, actual:90,  cumCost:325, line:9.17, cum:23.35, pA:50, pB:50 },
+  { n:11, cost:100, gift:0,  coupon:0, actual:100, cumCost:425, line:14.75,cum:38.09, pA:50, pB:50 },
+  { n:12, cost:110, gift:0,  coupon:0, actual:110, cumCost:535, line:23.73,cum:61.82, pA:50, pB:50 },
+  { n:13, cost:120, gift:0,  coupon:0, actual:120, cumCost:655, line:38.18,cum:100,   pA:50, pB:50 }
+];
+const MAX_ROUND = 2;
+const REWARD_POOL = ['基础大奖（A 档）', '高级大奖（B 档）'];
 
 /* ============ 棋盘 / 连线定义 ============ */
 const LINES = [
@@ -733,18 +775,31 @@ const LINES = [
 
 /* ============ 状态 ============ */
 let board = Array(16).fill(false);
-let drawN = 0;            // 已抽次数（下次抽奖为 drawN+1）
+let drawN = 0;            // 当前轮已抽次数
 let stars = 9999;
 let coins = 0;
 let coupons = 0;
-let round = 1;
-let totalLines = 0;
+let round = 1;            // 当前轮（1 或 2）
+let totalLines = 0;       // 累计成线数（跨轮统计）
 let busy = false;
-let plannedLine = null;   // 前 3 抽锁定的目标线（cells 数组）
-let foundLines = [];      // 本轮已成线（cells 字符串集合）
+let plannedLine = null;
+let foundLines = [];      // 当前轮已成线
+let activityFinished = false; // 两轮抽完
+let wonRewards = [];      // 已经获得过的奖励名（用于 round2 排重）
 
-/* ============ DOM ============ */
 const $ = (id) => document.getElementById(id);
+
+// 取当前轮的数值表
+function currentTable() { return round === 1 ? TABLE_R1 : TABLE_R2; }
+const row = (n) => currentTable()[n - 1];
+
+function condLineProb(n) {
+  if (n <= 3) return 0;
+  if (n >= 13) return 1;
+  const t = currentTable();
+  const cumPrev = t[n - 2].cum / 100;
+  return Math.max(0, Math.min(1, t[n - 1].line / 100 / Math.max(1e-9, 1 - cumPrev)));
+}
 
 function showToast(msg) {
   $('toast').textContent = msg;
@@ -801,23 +856,29 @@ function refreshMainHUD() {
   $('star').textContent = stars;
   $('coin').textContent = coins;
   $('coupon').textContent = coupons;
+  $('curRound').textContent = round;
   $('curN').textContent = drawN;
   $('progressText').textContent = board.filter(x => x).length + '/16';
   $('cumCost').textContent = drawN <= 0 ? 0 : row(drawN).cumCost;
   $('lineCount').textContent = totalLines;
 
-  // 主按钮成本提示
   const next = drawN + 1;
-  if (next > 13) {
-    $('mainCostHint').textContent = '下一轮';
+  if (activityFinished) {
+    $('mainCostHint').textContent = '已结束';
+    $('drawBtnMain').classList.add('disabled');
   } else {
-    const r = row(next);
-    if (r.actual === 0 && r.cost > 0) {
-      $('mainCostHint').textContent = '免费 (赠 ⭐' + r.gift + ')';
-    } else if (r.cost === 0) {
-      $('mainCostHint').textContent = '免费首抽';
+    $('drawBtnMain').classList.remove('disabled');
+    if (next > 13) {
+      $('mainCostHint').textContent = '下一轮';
     } else {
-      $('mainCostHint').textContent = r.actual.toString();
+      const r = row(next);
+      if (r.actual === 0 && r.cost > 0) {
+        $('mainCostHint').textContent = '免费 (赠 ⭐' + r.gift + ')';
+      } else if (r.cost === 0) {
+        $('mainCostHint').textContent = '免费首抽';
+      } else {
+        $('mainCostHint').textContent = r.actual.toString();
+      }
     }
   }
 }
@@ -827,6 +888,14 @@ function refreshPanelHUD() {
   $('modalN').textContent = drawN;
   $('modalCum').textContent = drawN <= 0 ? 0 : row(drawN).cumCost;
 
+  if (activityFinished) {
+    $('modalProb').textContent = '—';
+    $('drawBtnPanel').classList.add('disabled');
+    $('abLabel').textContent = '活动已结束';
+    $('abCostRow').style.display = 'none';
+    $('abGain').textContent = '两轮已抽完，请重置';
+    return;
+  }
   if (next > 13) {
     $('modalProb').textContent = '—';
     $('drawBtnPanel').classList.add('disabled');
@@ -838,20 +907,17 @@ function refreshPanelHUD() {
   const r = row(next);
   $('modalProb').textContent = r.line.toFixed(2) + '%';
   $('drawBtnPanel').classList.remove('disabled', 'gain-style');
-  $('abLabel').textContent = '点 1 盏灯（第 ' + next + ' 抽）';
+  $('abLabel').textContent = '点 1 盏灯（第 ' + round + ' 轮 · 第 ' + next + ' 抽）';
   $('abCostRow').style.display = 'flex';
 
   if (r.cost === 0) {
-    // 第 1 抽：免费
     $('abActualCost').textContent = '免费';
     $('abGain').textContent = '';
   } else if (r.actual === 0 && r.gift > 0) {
-    // 2/3 抽：标价但实付为 0
     $('abActualCost').innerHTML = '<span style="text-decoration:line-through;color:#aa8a7a;margin-right:4px">⭐' + r.cost + '</span>实付 0';
     $('abGain').textContent = '✨ 赠 ⭐' + r.gift + (r.coupon > 0 ? ' + 🎫×' + r.coupon : '');
     $('drawBtnPanel').classList.add('gain-style');
   } else if (r.actual < r.cost) {
-    // 第 4 抽：30 标价但实付 25
     $('abActualCost').innerHTML = '<span style="text-decoration:line-through;color:#aa8a7a;margin-right:4px">⭐' + r.cost + '</span>实付 ⭐' + r.actual;
     $('abGain').textContent = (r.gift > 0 ? '✨ 赠 ⭐' + r.gift : '') + (r.coupon > 0 ? ' + 🎫×' + r.coupon : '');
   } else {
@@ -860,91 +926,56 @@ function refreshPanelHUD() {
   }
 }
 
-/* ============ 点亮规划逻辑 ============ */
-function litCells() {
-  const arr = [];
-  for (let i = 0; i < 16; i++) if (board[i]) arr.push(i);
-  return arr;
-}
+/* ============ 点亮规划逻辑（不变） ============ */
 function unlit(line) { return line.filter(i => !board[i]); }
 function litCount(line) { return line.filter(i => board[i]).length; }
 
-// 选择"目标线"：覆盖最多已点格 + 剩余空位多 的线
 function pickTargetLine() {
-  // 已经成线过的、或全部点亮的线不选
   let best = null, bestScore = -1;
   for (const line of LINES) {
     const lc = litCount(line);
     if (lc === 4) continue;
-    // score: 已点位多更好；同分时随机抖动
     const score = lc * 10 + Math.random();
     if (score > bestScore) { bestScore = score; best = line; }
   }
   return best;
 }
 
-// 决定本抽要点亮哪一格
+let _willCompleteThisDraw = false;
+
 function decideLightIndex(n) {
-  // n: 第几抽（1-13）
-  // 前 3 抽：构建目标线，使其有 3 子（差 1 即可成线）
   if (n <= 3) {
     if (!plannedLine) plannedLine = pickTargetLine();
-    // 选目标线中尚未点亮的格
     const candidates = unlit(plannedLine);
     if (candidates.length > 0) return candidates[Math.floor(Math.random() * candidates.length)];
-    // 兜底
     return pickRandomEmpty();
   }
-
-  // 第 4 抽起：
-  // - 若本抽要"成线"（受概率控制）：选某条 3 已点的线把最后 1 子补上
-  // - 否则：保证抽完后仍存在至少一条 "3 子已点" 的活线
-  // 注意：这个函数只决定"点哪一格"，是否成线由概率层在外部判断后告知。
-  // 这里只负责满足"差一子"的连线状态：
-  //   - 若指定 willComplete=true，则补成 4 子；
-  //   - 否则点别的位置，但保留至少一条 "3-of-4" 活线。
-  // willComplete 通过外层全局变量 _willCompleteThisDraw 传递
   if (_willCompleteThisDraw) {
-    // 找一条 3 子已点 + 1 子未点 的线
     const ready = LINES.filter(l => litCount(l) === 3 && !foundLines.includes(l.join(',')));
     if (ready.length > 0) {
       const target = ready[Math.floor(Math.random() * ready.length)];
       const empty = unlit(target);
       return empty[0];
     }
-    // 没有 3 子线就退化为补足某条已有 3 子的线（异常分支）
     return pickRandomEmpty();
   }
-
-  // 不成线：要保证点亮后至少还有一条 "3-of-4" 活线
-  // 候选格：未点亮 & 不会唯一性断掉所有 3-子线
   const empties = [];
   for (let i = 0; i < 16; i++) if (!board[i]) empties.push(i);
-
-  // 先排除 "点了它会构成 4 子（成线）" 的格
   const safe = empties.filter(idx => {
-    // 模拟点亮 idx
     board[idx] = true;
     const completes = LINES.some(l => litCount(l) === 4 && !foundLines.includes(l.join(',')));
     board[idx] = false;
     return !completes;
   });
-
-  // 在 safe 中再优先选 "能让某条线达到 3 子" 的
   const cellsExtendTo3 = safe.filter(idx => {
     board[idx] = true;
     const has3 = LINES.some(l => litCount(l) === 3);
     board[idx] = false;
     return has3;
   });
-
   let pool = cellsExtendTo3.length > 0 ? cellsExtendTo3 : safe;
-
-  // 如果当前已有 3 子线，且本抽不成线，则可以随便选一个 safe 格（保留原 3 子线即可）
   const has3Now = LINES.some(l => litCount(l) === 3 && !foundLines.includes(l.join(',')));
-  if (has3Now) {
-    pool = safe.length > 0 ? safe : empties;
-  }
+  if (has3Now) pool = safe.length > 0 ? safe : empties;
   if (pool.length === 0) pool = empties;
   return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -955,16 +986,24 @@ function pickRandomEmpty() {
   return empties[Math.floor(Math.random() * empties.length)];
 }
 
-let _willCompleteThisDraw = false;
-
 /* ============ 抽奖核心 ============ */
 function doDraw() {
   if (busy) return;
+  if (activityFinished) { showToast('活动已结束，请重置'); return; }
+
   const n = drawN + 1;
-  if (n > 13) { showToast('已达 13 抽上限，开启下一轮'); startNewRound(); return; }
+  if (n > 13) {
+    if (round >= MAX_ROUND) {
+      activityFinished = true;
+      showToast('🏁 活动已全部完成');
+      refreshMainHUD(); refreshPanelHUD();
+      return;
+    }
+    startNewRound();
+    return;
+  }
   const r = row(n);
 
-  // 扣星币
   if (r.actual > 0 && stars < r.actual) {
     showToast('星币不足');
     return;
@@ -977,25 +1016,18 @@ function doDraw() {
 
   drawN = n;
 
-  // 决定是否成线
   let willHit = false;
   if (n >= 4) {
-    if (n === 13) {
-      willHit = true;
-    } else {
-      willHit = Math.random() < condLineProb(n);
-    }
+    if (n === 13) willHit = true;
+    else willHit = Math.random() < condLineProb(n);
   }
   _willCompleteThisDraw = willHit;
 
-  // 决定点亮哪格
   let idx = decideLightIndex(n);
 
-  // 兜底：n>=4 且 willHit=true 时必须存在 3 子线；若不存在，先点出 3 子线（理论上规划足够不会触发，但保险）
   if (willHit) {
     const ready = LINES.find(l => litCount(l) === 3 && !foundLines.includes(l.join(',')));
     if (!ready) {
-      // 没 3 子线，本抽降级为不成线
       willHit = false;
       _willCompleteThisDraw = false;
       idx = decideLightIndex(n);
@@ -1004,13 +1036,11 @@ function doDraw() {
     }
   }
 
-  // 点亮动画
   board[idx] = true;
   renderGrid(idx);
   renderMini();
   renderLinesSVG();
 
-  // 检查成线（基于实际状态）
   const newLine = LINES.find(l =>
     l.every(i => board[i]) && !foundLines.includes(l.join(','))
   );
@@ -1020,14 +1050,30 @@ function doDraw() {
       foundLines.push(newLine.join(','));
       totalLines++;
       drawLineSVG(newLine);
-      // 大奖类型：根据数值表决定是 480 还是 680
-      const is680 = Math.random() * 100 < r.p680;
-      $('rewardName').textContent = is680
-        ? '高级大奖（B 档）'
-        : '基础大奖（A 档）';
-      $('rewardEmoji').textContent = is680 ? '🌟' : '👧';
+
+      // 决定奖励：第 2 轮要排除已经获得过的
+      const availablePool = REWARD_POOL.filter(r => !wonRewards.includes(r));
+      let rewardName;
+      if (availablePool.length > 0) {
+        // 用 pA/pB 的比例做权重，再过滤
+        const isB = Math.random() * 100 < r.pB;
+        const preferred = isB ? '高级大奖（B 档）' : '基础大奖（A 档）';
+        rewardName = availablePool.includes(preferred) ? preferred : availablePool[0];
+      } else {
+        rewardName = '彩蛋奖励';
+      }
+      wonRewards.push(rewardName);
+
+      $('rewardName').textContent = rewardName;
+      $('rewardEmoji').textContent = rewardName.includes('B') ? '🌟' : '👧';
       $('hitDraw').textContent = n;
       $('roundNum').textContent = round;
+      // 调整领取按钮文案
+      if (round >= MAX_ROUND) {
+        $('rewardBtn').textContent = '领取（活动已结束）';
+      } else {
+        $('rewardBtn').textContent = '领取并开启第 ' + (round + 1) + ' 轮';
+      }
       setTimeout(() => {
         $('rewardModal').classList.add('show');
       }, 700);
@@ -1053,8 +1099,14 @@ function drawLineSVG(line) {
   svg.appendChild(ln);
 }
 
-/* ============ 轮次 ============ */
+/* ============ 轮次切换 / 全局重置 ============ */
 function startNewRound() {
+  if (round >= MAX_ROUND) {
+    activityFinished = true;
+    refreshMainHUD(); refreshPanelHUD();
+    showToast('🏁 活动已全部完成');
+    return;
+  }
   round++;
   board = Array(16).fill(false);
   drawN = 0;
@@ -1066,6 +1118,29 @@ function startNewRound() {
   refreshMainHUD();
   refreshPanelHUD();
   showToast('🎊 进入第 ' + round + ' 轮');
+}
+
+function resetAll() {
+  board = Array(16).fill(false);
+  drawN = 0;
+  round = 1;
+  totalLines = 0;
+  foundLines = [];
+  plannedLine = null;
+  activityFinished = false;
+  wonRewards = [];
+  stars = 9999;
+  coins = 0;
+  coupons = 0;
+  $('lineSvg').innerHTML = '';
+  $('boardModal').classList.remove('show');
+  $('rewardModal').classList.remove('show');
+  busy = false;
+  renderGrid();
+  renderMini();
+  refreshMainHUD();
+  refreshPanelHUD();
+  showToast('🔄 已重置，回到第 1 轮');
 }
 
 function openModal() {
@@ -1081,8 +1156,8 @@ function closeModal() {
 
 /* ============ 事件 ============ */
 $('drawBtnMain').addEventListener('click', () => {
+  if (activityFinished) { showToast('活动已结束，请重置'); return; }
   openModal();
-  // 主界面按钮：打开后立刻执行一次抽奖
   setTimeout(() => doDraw(), 280);
 });
 $('drawBtnPanel').addEventListener('click', (e) => {
@@ -1098,19 +1173,23 @@ $('boardMini').addEventListener('click', (e) => {
   if (busy) return;
   openModal();
 });
-
-// 棋盘弹窗背景层不再自动关闭（保留点击穿透到关闭按钮以外不响应）
 $('boardModal').addEventListener('click', (e) => {
-  // 仅当点击 modal 黑色蒙层（不在 panel 上）时关闭
   if (e.target.id === 'boardModal' && !busy) closeModal();
 });
-
 $('rewardBtn').addEventListener('click', (e) => {
   e.stopPropagation();
   $('rewardModal').classList.remove('show');
-  // 关闭奖励弹窗后停留在棋盘界面，玩家可以选择关闭或开启新一轮
-  // 自动开启新一轮：
+  if (round >= MAX_ROUND) {
+    activityFinished = true;
+    refreshMainHUD(); refreshPanelHUD();
+    showToast('🏁 两轮已全部完成，请重置');
+    return;
+  }
   setTimeout(() => startNewRound(), 200);
+});
+$('resetBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (confirm('确认重置全部进度？将回到第 1 轮第 1 抽。')) resetAll();
 });
 
 /* ============ 启动 ============ */
