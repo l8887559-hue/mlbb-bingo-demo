@@ -1287,23 +1287,44 @@ function decideLightIndex(n) {
   }
   const empties = [];
   for (let i = 0; i < 16; i++) if (!board[i]) empties.push(i);
+  // safe 格：点亮后不会出现新的 4 子（避免意外成线）
   const safe = empties.filter(idx => {
     board[idx] = true;
     const completes = LINES.some(l => litCount(l) === 4 && !foundLines.includes(l.join(',')));
     board[idx] = false;
     return !completes;
   });
-  const cellsExtendTo3 = safe.filter(idx => {
+
+  // 给每个 safe 候选打分，优先"和已有点连接、能扩展更多 3-子 / 2-子线"的格子
+  const baseLit = LINES.map(l => litCount(l));
+  const scored = safe.map(idx => {
     board[idx] = true;
-    const has3 = LINES.some(l => litCount(l) === 3);
+    let new3 = 0, new2 = 0, fromIsolated = 0;
+    let touchExisting = false;
+    LINES.forEach((l, li) => {
+      const lit = litCount(l);
+      if (baseLit[li] === 2 && lit === 3 && !foundLines.includes(l.join(','))) new3++;
+      else if (baseLit[li] === 1 && lit === 2) new2++;
+      else if (baseLit[li] === 0 && lit === 1) fromIsolated++;
+    });
+    // 检查这一格是否与某个已点亮的格"相邻"（共享同一条线）
+    for (const l of LINES) {
+      if (l.includes(idx) && l.some(j => j !== idx && board[j])) { touchExisting = true; break; }
+    }
     board[idx] = false;
-    return has3;
+    // 评分：升 3 子最重要 → 升 2 子次之 → 必须与已有点共享线（连接性）→ 凭空孤立点惩罚
+    let score = new3 * 1000 + new2 * 50 + (touchExisting ? 20 : 0) - fromIsolated * 30;
+    score += Math.random();
+    return { idx, score, new3, new2 };
   });
-  let pool = cellsExtendTo3.length > 0 ? cellsExtendTo3 : safe;
-  const has3Now = LINES.some(l => litCount(l) === 3 && !foundLines.includes(l.join(',')));
-  if (has3Now) pool = safe.length > 0 ? safe : empties;
-  if (pool.length === 0) pool = empties;
-  return pool[Math.floor(Math.random() * pool.length)];
+
+  if (scored.length === 0) return pickRandomEmpty();
+  scored.sort((a, b) => b.score - a.score);
+
+  // 在分数最高的若干个里随机一个，避免每次完全相同（更自然）
+  const topScore = scored[0].score;
+  const top = scored.filter(s => s.score >= topScore - 5);
+  return top[Math.floor(Math.random() * top.length)].idx;
 }
 
 function pickRandomEmpty() {
