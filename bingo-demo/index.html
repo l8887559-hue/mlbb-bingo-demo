@@ -1522,6 +1522,8 @@ function rollAnimation(targetIdx, onDone) {
   }
   function highlightCell(idx) {
     clearAll('spinning');
+    // 已点亮的灯不参与滚动闪烁
+    if (board[idx]) return;
     const l = getLamp(idx);
     if (l) l.classList.add('spinning');
   }
@@ -1589,79 +1591,96 @@ function rollAnimation(targetIdx, onDone) {
     colPhaseSteps.push({ c: targetCol, delay: 260 });
   }
 
-  /* ===== 阶段 3：未点亮格上滚动，优先经过/悬停"差一子可成线"的诱饵格 =====
-   * 优先级：① 诱饵格优先（让玩家以为要中那个甜蜜格）
-   *         ② 跳过已点亮的格
-   *         ③ 最后稳停 target
-   * 诱饵 = 未点亮 & 点亮后能让某条线达到 4 子（即 lit==3 的活线缺口）
-   *       次诱饵 = 未点亮 & 点亮后能升级 2→3 子线
+  /* ===== 阶段 3：在"锁定的行/列范围内的未点亮格"上滚动 =====
+   * 范围规则：
+   *   - 行列都锁定 → 行 ∪ 列的未点亮格（target 必含）
+   *   - 仅行锁定   → 该行的未点亮格
+   *   - 仅列锁定   → 该列的未点亮格
+   *   - 都没锁定   → 全棋盘未点亮格
+   * 不再跨非锁定的行/列做闪烁。
    */
-  // 全棋盘未点亮格
-  const allEmpties = [];
-  for (let i = 0; i < 16; i++) {
-    if (!board[i] || i === targetIdx) allEmpties.push(i);
-  }
-  // 计算诱饵分级
-  const lureA = []; // 一级诱饵：差 1 子可成线（有立即中奖的视觉错觉）
-  const lureB = []; // 二级诱饵：能让某条线 2→3
-  for (const idx of allEmpties) {
-    if (idx === targetIdx) continue;
-    board[idx] = true;
+  const scopeIdx = (() => {
+    const set = new Set();
+    if (playRowPhase) {
+      for (let c = 0; c < 4; c++) {
+        const i = targetRow * 4 + c;
+        if (!board[i]) set.add(i);
+      }
+    }
+    if (playColPhase) {
+      for (let r = 0; r < 4; r++) {
+        const i = r * 4 + targetCol;
+        if (!board[i]) set.add(i);
+      }
+    }
+    if (!playRowPhase && !playColPhase) {
+      for (let i = 0; i < 16; i++) if (!board[i]) set.add(i);
+    }
+    set.add(targetIdx);
+    return Array.from(set);
+  })();
+
+  // 在 scope 内识别"诱饵格"：点亮后能让某条线变 4 子（差一子可成线）
+  const lureA = []; // 一级诱饵
+  const lureB = []; // 二级诱饵：能升级 2→3 子线
+  for (const i of scopeIdx) {
+    if (i === targetIdx) continue;
+    board[i] = true;
     const a = LINES.some(l => litCount(l) === 4 && !foundLines.includes(l.join(',')));
-    const b = LINES.some((l, li) => litCount(l) === 3 && !foundLines.includes(l.join(',')));
-    board[idx] = false;
-    if (a) lureA.push(idx);
-    else if (b) lureB.push(idx);
+    const b = LINES.some(l => litCount(l) === 3 && !foundLines.includes(l.join(',')));
+    board[i] = false;
+    if (a) lureA.push(i);
+    else if (b) lureB.push(i);
   }
-  // 滚动池：诱饵优先，其次普通空格，target 必须在
+
   const cellSteps = [];
 
-  // 高速来回扫（在所有空格上）
-  const fastSeq = [];
-  for (let k = 0; k < 2; k++) {
-    for (const i of allEmpties) fastSeq.push(i);
+  // 高速来回扫（只在 scope 内）
+  if (scopeIdx.length >= 2) {
+    const fast = [];
+    const ordered = [...scopeIdx].sort((a, b) => a - b);
+    for (let k = 0; k < 2; k++) {
+      for (const i of ordered) fast.push(i);
+      for (let m = ordered.length - 2; m >= 1; m--) fast.push(ordered[m]);
+    }
+    fast.forEach(i => cellSteps.push({ idx: i, delay: 75 }));
+  } else {
+    cellSteps.push({ idx: scopeIdx[0], delay: 75 });
   }
-  fastSeq.forEach(idx => cellSteps.push({ idx, delay: 75 }));
 
-  // 中速段：交替在 一级诱饵 / target 之间，制造"差点中→啊不是→又一个差点"
-  // 给 4-6 步，速度逐渐加慢
+  // 中速段：诱饵 ↔ target 交替
   const midDelays = [110, 140, 175, 215, 260];
   for (let k = 0; k < midDelays.length; k++) {
     let pickIdx;
-    // 偶数步：诱饵优先；奇数步：target 露脸或普通空格
     if (k % 2 === 0 && lureA.length > 0) {
       pickIdx = lureA[Math.floor(Math.random() * lureA.length)];
     } else if (k % 2 === 1) {
-      // 让 target 在中段露 1~2 次
       pickIdx = targetIdx;
     } else if (lureB.length > 0) {
       pickIdx = lureB[Math.floor(Math.random() * lureB.length)];
     } else {
-      pickIdx = allEmpties[Math.floor(Math.random() * allEmpties.length)];
+      pickIdx = scopeIdx[Math.floor(Math.random() * scopeIdx.length)];
     }
     cellSteps.push({ idx: pickIdx, delay: midDelays[k] });
   }
 
-  // 慢速段：在 一级诱饵 ↔ target 之间反复跳，制造"过站"
-  // 节奏：诱饵(慢) → target(更慢) → 诱饵(更慢) → target(咬合)
+  // 慢速段：在 诱饵 ↔ target 之间反复跳，最后咬合
   if (lureA.length > 0) {
-    const lureChoice = lureA[Math.floor(Math.random() * lureA.length)];
-    cellSteps.push({ idx: lureChoice,  delay: 320 });  // 在诱饵上停一拍（玩家以为中了）
-    cellSteps.push({ idx: targetIdx,   delay: 380 });  // 跳到 target
-    cellSteps.push({ idx: lureChoice,  delay: 360 });  // 又跳回诱饵（"啊还是那边"）
-    cellSteps.push({ idx: targetIdx,   delay: 440 });  // 最终咬合
+    const lc = lureA[Math.floor(Math.random() * lureA.length)];
+    cellSteps.push({ idx: lc,        delay: 320 });
+    cellSteps.push({ idx: targetIdx, delay: 380 });
+    cellSteps.push({ idx: lc,        delay: 360 });
+    cellSteps.push({ idx: targetIdx, delay: 440 });
   } else if (lureB.length > 0) {
-    const lureChoice = lureB[Math.floor(Math.random() * lureB.length)];
-    cellSteps.push({ idx: lureChoice, delay: 300 });
-    cellSteps.push({ idx: targetIdx,  delay: 380 });
-    cellSteps.push({ idx: targetIdx,  delay: 440 });
+    const lc = lureB[Math.floor(Math.random() * lureB.length)];
+    cellSteps.push({ idx: lc,        delay: 300 });
+    cellSteps.push({ idx: targetIdx, delay: 380 });
+    cellSteps.push({ idx: targetIdx, delay: 440 });
   } else {
-    // 没诱饵：退化为简单"过站"
-    // 在 allEmpties 中找一个非 target 格做过站
-    const others = allEmpties.filter(i => i !== targetIdx);
+    const others = scopeIdx.filter(i => i !== targetIdx);
     if (others.length > 0) {
       const o = others[Math.floor(Math.random() * others.length)];
-      cellSteps.push({ idx: o,        delay: 320 });
+      cellSteps.push({ idx: o,         delay: 320 });
       cellSteps.push({ idx: targetIdx, delay: 440 });
     } else {
       cellSteps.push({ idx: targetIdx, delay: 440 });
@@ -1713,14 +1732,7 @@ function rollAnimation(targetIdx, onDone) {
       clearAll('spinning');
       if (cur.kind === 'row') setRowLocked(targetRow);
       else if (cur.kind === 'col') setColLocked(targetCol);
-      else if (cur.kind === 'cell') {
-        // cell 阶段结束（实际不会进这里，因为 cell 是最后一个阶段，会走顶部的锁定爆光分支）
-      }
-      // 进入 cell 阶段前清除行/列锁定（cell 会跨格跳，行列锁定会干扰视觉）
-      if (pIdx + 1 < phases.length && phases[pIdx + 1].kind === 'cell') {
-        clearAll('row-locked');
-        clearAll('col-locked');
-      }
+      // cell 阶段会在锁定的行/列范围内跳，保留 row-locked / col-locked 高亮
       pIdx++;
       sIdx = 0;
       setTimeout(next, 220);
