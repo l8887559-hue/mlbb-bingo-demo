@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Bingo 抽奖 Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  html, body { height: 100%; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  body {
+    background: #0a0e1a;
+    color: #fff;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .stage {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    max-width: 1280px;
+    max-height: 720px;
+    background:
+      radial-gradient(ellipse at 50% 40%, rgba(255,180,200,0.15), transparent 60%),
+      linear-gradient(180deg, #1a1d3a 0%, #2a2050 30%, #3a2a5a 60%, #1a1530 100%);
+    overflow: hidden;
+    box-shadow: 0 0 60px rgba(0,0,0,0.6);
+  }
+  .bg-layer {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(circle at 15% 20%, rgba(255,200,220,0.3) 0%, transparent 8%),
+      radial-gradient(circle at 25% 30%, rgba(255,200,220,0.25) 0%, transparent 6%),
+      radial-gradient(circle at 8% 50%, rgba(255,200,220,0.2) 0%, transparent 7%);
+    pointer-events: none;
+  }
+  .lantern {
+    position: absolute;
+    width: 14px; height: 18px;
+    background: radial-gradient(circle, #ffb578 30%, #ff7a3a 70%, #c44a1a 100%);
+    border-radius: 50%;
+    box-shadow: 0 0 12px rgba(255,150,80,0.8);
+    animation: float 6s ease-in-out infinite;
+  }
+  .lantern::after {
+    content: ''; position: absolute;
+    bottom: -4px; left: 50%;
+    transform: translateX(-50%);
+    width: 1px; height: 8px;
+    background: rgba(255,200,150,0.4);
+  }
+  @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-15px)} }
+
+  .topbar {
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 50px;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0 20px;
+    z-index: 10;
+    background: linear-gradient(180deg, rgba(0,0,0,0.4), transparent);
+  }
+  .back { display: flex; align-items: center; gap: 8px; font-size: 16px; cursor: pointer; }
+  .back-arrow {
+    width: 0; height: 0;
+    border-top: 6px solid transparent;
+    border-bottom: 6px solid transparent;
+    border-right: 8px solid #fff;
+  }
+  .currencies { display: flex; gap: 12px; }
+  .currency {
+    display: flex; align-items: center; gap: 5px;
+    background: rgba(0,0,0,0.4);
+    padding: 4px 12px 4px 4px;
+    border-radius: 20px;
+    font-size: 13px;
+  }
+  .currency-icon {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+  }
+  .icon-coin { background: linear-gradient(135deg, #ffd966, #b8860b); }
+  .icon-key { background: linear-gradient(135deg, #87ceeb, #1e90ff); }
+  .icon-ticket { background: linear-gradient(135deg, #ff9aa2, #ff6b6b); }
+  .icon-gem { background: linear-gradient(135deg, #c8a8ff, #8a4fff); }
+  .currency .plus { color: #ffd966; font-weight: bold; margin-left: 2px; }
+
+  .side-nav {
+    position: absolute;
+    left: 12px; top: 60px; bottom: 40px;
+    width: 70px;
+    display: flex; flex-direction: column; gap: 8px;
+    z-index: 5; overflow-y: auto;
+  }
+  .side-nav::-webkit-scrollbar { display: none; }
+  .nav-item {
+    width: 60px; height: 60px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgba(80,60,140,0.6), rgba(40,30,80,0.6));
+    border: 1px solid rgba(180,160,220,0.3);
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column;
+    font-size: 9px; cursor: pointer; position: relative; flex-shrink: 0;
+  }
+  .nav-item.active {
+    border-color: #ffd966;
+    box-shadow: 0 0 10px rgba(255,217,102,0.5);
+  }
+  .nav-emoji { font-size: 22px; margin-bottom: 2px; }
+  .nav-tag {
+    position: absolute;
+    top: -4px; left: -4px;
+    background: linear-gradient(135deg, #ff6b9d, #c44569);
+    color: #fff;
+    font-size: 8px; padding: 1px 4px; border-radius: 3px;
+  }
+
+  .character {
+    position: absolute;
+    left: 50%; top: 52%;
+    transform: translate(-50%, -50%);
+    width: 280px; height: 380px;
+    pointer-events: none;
+  }
+  .char-glow {
+    position: absolute; inset: -40px;
+    background: radial-gradient(circle, rgba(180,220,255,0.3), transparent 60%);
+    animation: glow 3s ease-in-out infinite;
+  }
+  @keyframes glow { 0%,100%{opacity:0.6;transform:scale(1)} 50%{opacity:1;transform:scale(1.05)} }
+  .char-svg { position: relative; width: 100%; height: 100%; }
+  .char-label {
+    position: absolute;
+    left: calc(50% - 200px); top: 35%;
+    background: linear-gradient(180deg, #4a90e2, #2a5fa0);
+    color: #fff; padding: 6px 4px; font-size: 13px;
+    writing-mode: vertical-rl;
+    border-radius: 3px; letter-spacing: 2px;
+  }
+  .char-name {
+    position: absolute;
+    left: calc(50% - 165px); top: 32%;
+    color: #fff; font-size: 16px;
+    writing-mode: vertical-rl;
+    letter-spacing: 4px;
+    text-shadow: 0 0 6px rgba(0,0,0,0.6);
+  }
+  .title-area {
+    position: absolute;
+    right: 30px; top: 60px;
+    text-align: right;
+  }
+  .title-main {
+    font-size: 32px; font-weight: bold;
+    text-shadow: 0 0 12px rgba(180,220,255,0.6);
+    letter-spacing: 4px;
+  }
+  .title-sub { font-size: 14px; color: rgba(255,255,255,0.7); margin-top: 4px; }
+  .title-date { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 6px; }
+  .gift-box {
+    position: absolute;
+    right: 30px; top: 170px;
+    width: 220px;
+    background: linear-gradient(180deg, rgba(255,180,200,0.95), rgba(220,140,180,0.95));
+    border-radius: 10px;
+    padding: 8px;
+    color: #5a2a4a;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .gift-tag {
+    background: #fff; color: #c44569;
+    font-size: 12px; font-weight: bold;
+    padding: 2px 8px; border-radius: 10px;
+    display: inline-block; margin-bottom: 4px;
+  }
+  .gift-save { font-size: 12px; }
+  .gift-save b { font-size: 16px; color: #d63031; }
+  .gift-row { display: flex; gap: 6px; margin-top: 6px; }
+  .gift-item {
+    flex: 1;
+    background: rgba(255,255,255,0.4);
+    border-radius: 6px;
+    padding: 4px;
+    text-align: center;
+    font-size: 11px;
+  }
+  .gift-item.gold { background: rgba(255,215,0,0.5); }
+  .gift-item.purple { background: rgba(180,140,220,0.5); }
+
+  /* 主界面抽奖按钮 */
+  .draw-btn {
+    position: absolute;
+    left: 50%; bottom: 70px;
+    transform: translateX(-50%);
+    width: 220px;
+    background: linear-gradient(180deg, #fff, #f0e0c0);
+    color: #5a4020;
+    padding: 12px 0;
+    border-radius: 10px;
+    text-align: center;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(255,200,100,0.5);
+    border: 2px solid #ffd966;
+    transition: transform 0.1s;
+  }
+  .draw-btn:active { transform: translateX(-50%) scale(0.97); }
+  .draw-btn .label { font-size: 16px; font-weight: bold; }
+  .draw-btn .cost {
+    display: flex; align-items: center; justify-content: center;
+    gap: 4px; margin-top: 2px; font-size: 13px;
+  }
+  .star-icon {
+    width: 16px; height: 16px;
+    background: linear-gradient(135deg, #87ceeb, #4a90e2);
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .board-mini {
+    position: absolute;
+    right: 30px; bottom: 60px;
+    width: 130px; height: 130px;
+    background: rgba(255,255,255,0.95);
+    border-radius: 8px;
+    padding: 8px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 4px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    transition: transform 0.2s;
+  }
+  .board-mini:hover { transform: scale(1.05); }
+  .mini-cell {
+    border-radius: 50%;
+    border: 2px solid #d0d0d0;
+    background: #fff;
+    transition: all 0.3s;
+  }
+  .mini-cell.lit {
+    background: linear-gradient(135deg, #ffb74d, #ff8a3a);
+    border-color: #ff8a3a;
+    box-shadow: 0 0 6px rgba(255,150,80,0.6);
+  }
+  .mini-hint {
+    position: absolute;
+    bottom: 2px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    color: #888;
+    background: rgba(255,255,255,0.9);
+    padding: 1px 6px;
+    border-radius: 8px;
+    white-space: nowrap;
+  }
+  .progress-info {
+    position: absolute;
+    left: 100px; bottom: 20px;
+    color: rgba(255,255,255,0.7);
+    font-size: 12px; z-index: 5;
+  }
+
+  /* 棋盘弹窗 */
+  .modal {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 100;
+    backdrop-filter: blur(4px);
+  }
+  .modal.show { display: flex; animation: fadeIn 0.3s; }
+  @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+
+  .board-panel {
+    width: 480px;
+    background: linear-gradient(180deg, #fce4d6 0%, #f5d4c0 40%, #b8d4e0 100%);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 0 40px rgba(255,200,150,0.3);
+    position: relative;
+  }
+  .board-panel::before {
+    content: ''; position: absolute;
+    top: 0; left: 0; right: 0; height: 60%;
+    background: radial-gradient(ellipse at 70% 50%, rgba(180,200,220,0.3), transparent 60%);
+    pointer-events: none;
+  }
+  .pagoda { position: absolute; right: 20px; top: 30px; font-size: 36px; opacity: 0.8; }
+  .panel-title {
+    position: absolute;
+    top: 16px; left: 20px;
+    font-size: 12px; color: #6a8090; letter-spacing: 1px;
+  }
+  .panel-close {
+    position: absolute;
+    top: 12px; right: 12px;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.18);
+    color: #fff;
+    font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    z-index: 10;
+    transition: all 0.2s;
+  }
+  .panel-close:hover { background: rgba(220,80,60,0.8); }
+
+  .board-grid {
+    margin: 50px auto 12px;
+    width: 380px; height: 380px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 12px;
+    position: relative;
+    z-index: 2;
+  }
+  .lamp-cell {
+    display: flex; align-items: center; justify-content: center;
+    position: relative; transition: transform 0.3s;
+  }
+  .lamp { width: 70px; height: 80px; position: relative; transition: all 0.4s; }
+  .lamp::after {
+    content: ''; position: absolute;
+    bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 20px; height: 8px;
+    background: #8a8a8a;
+    border-radius: 2px;
+  }
+  .lamp::before {
+    content: ''; position: absolute;
+    bottom: 8px; left: 50%; transform: translateX(-50%);
+    width: 4px; height: 18px;
+    background: linear-gradient(180deg, #aaa, #777);
+  }
+  .lamp-body {
+    position: absolute;
+    top: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: #c8c8c8;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.4s;
+    box-shadow: inset -4px -4px 8px rgba(0,0,0,0.2);
+  }
+  .lamp-face { color: #888; font-size: 22px; letter-spacing: -3px; transition: color 0.4s; }
+  .lamp.lit .lamp-body {
+    background: radial-gradient(circle at 30% 30%, #fff5b8, #ffb74d 60%, #ff8a3a 100%);
+    box-shadow:
+      0 0 20px rgba(255,180,80,0.8),
+      inset -4px -4px 8px rgba(255,140,50,0.3);
+  }
+  .lamp.lit .lamp-face { color: #c44a1a; }
+  .lamp.justlit { animation: lightUp 0.6s ease-out; }
+  @keyframes lightUp {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.4); filter: brightness(1.5); }
+    100% { transform: scale(1); }
+  }
+
+  .line-svg {
+    position: absolute;
+    pointer-events: none;
+    z-index: 3;
+    left: 50px; top: 50px;
+    width: 380px; height: 380px;
+  }
+  .line-svg line {
+    stroke: #ff6b35;
+    stroke-width: 4;
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 8px rgba(255,180,80,0.9));
+    stroke-dasharray: 600;
+    stroke-dashoffset: 600;
+    animation: drawLine 0.6s ease-out forwards;
+  }
+  @keyframes drawLine { to { stroke-dashoffset: 0; } }
+
+  .panel-stats {
+    margin: 0 24px 8px;
+    background: rgba(255,255,255,0.5);
+    border-radius: 8px;
+    padding: 8px 12px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 6px;
+    font-size: 11px;
+    color: #6a4a3a;
+  }
+  .stat-item { text-align: center; }
+  .stat-label { color: #9a7a6a; font-size: 10px; margin-bottom: 2px; }
+  .stat-value { font-size: 14px; font-weight: bold; color: #c44a1a; }
+  .stat-value.small { font-size: 12px; }
+
+  .panel-action {
+    padding: 6px 24px 22px;
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+  }
+  .action-btn {
+    flex: 1;
+    background: linear-gradient(180deg, #fff8e8, #ffd9a0);
+    color: #5a3010;
+    border: 2px solid #ffb74d;
+    border-radius: 24px;
+    padding: 10px 0;
+    text-align: center;
+    cursor: pointer;
+    box-shadow: 0 3px 10px rgba(255,170,90,0.5);
+    transition: transform 0.1s;
+  }
+  .action-btn:active { transform: scale(0.97); }
+  .action-btn.disabled {
+    background: #d8c8b8;
+    color: #888;
+    cursor: not-allowed;
+    box-shadow: none;
+    border-color: #b0a090;
+    pointer-events: none;
+  }
+  .action-btn.gain-style {
+    background: linear-gradient(180deg, #d8f0ff, #a4d8ff);
+    border-color: #4a9ade;
+  }
+  .ab-label { font-size: 14px; font-weight: bold; }
+  .ab-cost {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    font-size: 12px;
+    margin-top: 2px;
+  }
+  .ab-cost .star-icon { width: 14px; height: 14px; }
+  .ab-gain {
+    color: #1a7a3a;
+    font-size: 11px;
+    margin-top: 2px;
+  }
+
+  /* 大奖弹窗 */
+  .reward-modal {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 200;
+  }
+  .reward-modal.show { display: flex; }
+  .reward-content {
+    text-align: center;
+    animation: rewardPop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+    position: relative;
+  }
+  @keyframes rewardPop {
+    0% { transform: scale(0.3); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .reward-rays {
+    position: absolute; inset: 0;
+    background:
+      conic-gradient(from 0deg,
+        transparent 0deg, rgba(255,215,80,0.3) 10deg,
+        transparent 20deg, rgba(255,215,80,0.3) 30deg,
+        transparent 40deg, rgba(255,215,80,0.3) 50deg,
+        transparent 60deg);
+    animation: spin 8s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .reward-title {
+    font-size: 36px;
+    color: #ffd966;
+    font-weight: bold;
+    margin-bottom: 10px;
+    text-shadow: 0 0 20px rgba(255,217,102,0.8);
+    letter-spacing: 4px;
+  }
+  .reward-sub { font-size: 18px; color: #fff; margin-bottom: 30px; }
+  .reward-card {
+    width: 220px; height: 280px;
+    background: linear-gradient(180deg, #ffe8a8, #ffb74d);
+    border-radius: 12px;
+    margin: 0 auto;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: #5a2a0a;
+    box-shadow: 0 0 40px rgba(255,180,80,0.6);
+    border: 3px solid #fff;
+  }
+  .reward-emoji { font-size: 100px; margin-bottom: 10px; }
+  .reward-name { font-size: 22px; font-weight: bold; }
+  .reward-desc { font-size: 13px; margin-top: 6px; opacity: 0.8; }
+  .reward-btn {
+    margin-top: 30px;
+    padding: 12px 50px;
+    background: linear-gradient(180deg, #ffd966, #ff9a3a);
+    color: #5a2a0a;
+    border-radius: 25px;
+    font-size: 16px; font-weight: bold;
+    cursor: pointer;
+    border: 2px solid #fff;
+  }
+
+  .toast {
+    position: absolute;
+    top: 80px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.7);
+    color: #ffd966;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 14px;
+    z-index: 300;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="bg-layer"></div>
+
+  <div class="lantern" style="top:8%;left:20%;animation-delay:0s"></div>
+  <div class="lantern" style="top:12%;left:35%;animation-delay:1s"></div>
+  <div class="lantern" style="top:18%;left:60%;animation-delay:2s"></div>
+  <div class="lantern" style="top:25%;left:75%;animation-delay:0.5s"></div>
+  <div class="lantern" style="top:14%;left:48%;animation-delay:1.5s"></div>
+
+  <div class="topbar">
+    <div class="back">
+      <span class="back-arrow"></span>
+      <span>抽奖</span>
+      <span style="opacity:0.5">?</span>
+    </div>
+    <div class="currencies">
+      <div class="currency"><div class="currency-icon icon-coin">💰</div><span id="coin">0</span></div>
+      <div class="currency"><div class="currency-icon icon-key">🔑</div><span id="key">0</span></div>
+      <div class="currency"><div class="currency-icon icon-ticket">🎫</div><span id="coupon">0</span><span class="plus">+</span></div>
+      <div class="currency"><div class="currency-icon icon-gem">💎</div><span id="star">9999</span><span class="plus">+</span></div>
+    </div>
+  </div>
+
+  <div class="side-nav">
+    <div class="nav-item"><div class="nav-tag">活动</div><div class="nav-emoji">🌸</div></div>
+    <div class="nav-item active">
+      <div class="nav-tag">活动</div>
+      <div class="nav-emoji">⭐</div>
+      <div>活动一</div>
+    </div>
+    <div class="nav-item"><div class="nav-emoji">🌪️</div><div>活动二</div></div>
+    <div class="nav-item">
+      <div class="nav-tag">活动</div>
+      <div class="nav-emoji">🎮</div>
+      <div>活动三</div>
+    </div>
+    <div class="nav-item"><div class="nav-emoji">🌌</div><div>活动四</div></div>
+    <div class="nav-item"><div class="nav-emoji">⚔️</div><div>活动五</div></div>
+  </div>
+
+  <div class="char-label">限定</div>
+  <div class="char-name">Bingo · 抽奖</div>
+  <div class="character">
+    <div class="char-glow"></div>
+    <svg class="char-svg" viewBox="0 0 280 380">
+      <ellipse cx="140" cy="365" rx="80" ry="8" fill="rgba(0,0,0,0.4)"/>
+      <path d="M 80 360 Q 140 300 200 360 Q 200 280 175 220 L 105 220 Q 80 280 80 360 Z" fill="#1a3a6a"/>
+      <path d="M 90 355 Q 140 310 190 355 Q 190 290 170 230 L 110 230 Q 90 290 90 355 Z" fill="#2a5a9a"/>
+      <rect x="105" y="215" width="70" height="14" fill="#d4a838"/>
+      <rect x="105" y="215" width="70" height="4" fill="#f0c850"/>
+      <path d="M 105 220 L 175 220 L 165 175 L 115 175 Z" fill="#0a2a4a"/>
+      <path d="M 75 230 Q 60 260 70 290 L 95 285 L 95 220 Z" fill="#2a5a9a"/>
+      <path d="M 205 230 Q 220 260 210 290 L 185 285 L 185 220 Z" fill="#2a5a9a"/>
+      <path d="M 60 275 Q 75 290 95 285 L 95 270 Q 78 275 65 268 Z" fill="#d4a838"/>
+      <path d="M 220 275 Q 205 290 185 285 L 185 270 Q 202 275 215 268 Z" fill="#d4a838"/>
+      <circle cx="78" cy="295" r="10" fill="#ffd9b8"/>
+      <circle cx="202" cy="295" r="10" fill="#ffd9b8"/>
+      <rect x="128" y="160" width="24" height="20" fill="#ffd9b8"/>
+      <ellipse cx="140" cy="120" rx="58" ry="62" fill="#ffe4cc"/>
+      <path d="M 82 110 Q 80 60 120 50 Q 140 40 165 50 Q 200 60 198 115 Q 195 90 175 80 Q 170 95 160 85 Q 150 70 130 75 Q 115 80 105 95 Q 95 105 82 110 Z" fill="#5cc4e0"/>
+      <path d="M 95 95 Q 110 75 125 80 Q 130 90 120 100 Z" fill="#4ab4d0"/>
+      <path d="M 155 80 Q 175 75 185 95 Q 180 105 165 100 Z" fill="#4ab4d0"/>
+      <path d="M 82 110 Q 70 160 80 200 Q 75 180 78 130 Z" fill="#5cc4e0"/>
+      <path d="M 198 110 Q 215 170 200 215 Q 205 180 200 130 Z" fill="#5cc4e0"/>
+      <ellipse cx="84" cy="125" rx="6" ry="9" fill="#ffd9b8"/>
+      <ellipse cx="196" cy="125" rx="6" ry="9" fill="#ffd9b8"/>
+      <circle cx="84" cy="135" r="3" fill="#d4a838"/>
+      <circle cx="196" cy="135" r="3" fill="#d4a838"/>
+      <ellipse cx="118" cy="128" rx="11" ry="14" fill="#fff"/>
+      <ellipse cx="162" cy="128" rx="11" ry="14" fill="#fff"/>
+      <ellipse cx="118" cy="130" rx="9" ry="12" fill="#d4a020"/>
+      <ellipse cx="162" cy="130" rx="9" ry="12" fill="#d4a020"/>
+      <ellipse cx="118" cy="130" rx="5" ry="7" fill="#5a3010"/>
+      <ellipse cx="162" cy="130" rx="5" ry="7" fill="#5a3010"/>
+      <ellipse cx="120" cy="125" rx="3" ry="3" fill="#fff"/>
+      <ellipse cx="164" cy="125" rx="3" ry="3" fill="#fff"/>
+      <path d="M 135 152 Q 140 156 145 152" stroke="#a04030" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <ellipse cx="105" cy="145" rx="6" ry="3" fill="rgba(255,150,150,0.5)"/>
+      <ellipse cx="175" cy="145" rx="6" ry="3" fill="rgba(255,150,150,0.5)"/>
+      <circle cx="140" cy="58" r="6" fill="#ffd966"/>
+      <path d="M 134 60 L 140 50 L 146 60 Z" fill="#ffd966"/>
+    </svg>
+  </div>
+
+  <div class="title-area">
+    <div class="title-main">Bingo 抽奖</div>
+    <div class="title-sub">连线召唤</div>
+    <div class="title-date">7月9日至8月19日</div>
+  </div>
+
+  <div class="gift-box">
+    <div style="display:flex;align-items:center;gap:6px">
+      <div class="gift-tag">限时礼包</div>
+    </div>
+    <div class="gift-save">可省 <b>9000</b> 💰</div>
+    <div class="gift-row">
+      <div class="gift-item gold">🎁<br>5</div>
+      <div class="gift-item purple">🎮<br>10</div>
+    </div>
+  </div>
+
+  <!-- 主界面入口按钮 -->
+  <div class="draw-btn" id="drawBtnMain">
+    <div class="label">点 1 盏灯</div>
+    <div class="cost">
+      <span class="star-icon"></span>
+      <span id="mainCostHint">免费</span>
+    </div>
+  </div>
+
+  <div class="board-mini" id="boardMini"></div>
+  <div class="mini-hint">点击查看棋盘</div>
+
+  <div class="progress-info">
+    本轮: 第 <span id="curN">0</span>/13 抽 ｜ 已点 <span id="progressText">0/16</span> ｜ 累积花费 ⭐<span id="cumCost">0</span> ｜ 完成连线 <span id="lineCount">0</span>
+  </div>
+
+  <!-- 棋盘弹窗（抽奖发生在这里） -->
+  <div class="modal" id="boardModal">
+    <div class="board-panel" id="boardPanel">
+      <div class="panel-title">点亮棋盘 · 连线得奖</div>
+      <div class="panel-close" id="closeBtn">✕</div>
+      <div class="pagoda">🏯</div>
+      <div class="board-grid" id="boardGrid"></div>
+      <svg class="line-svg" id="lineSvg" viewBox="0 0 380 380"></svg>
+      <div class="panel-stats">
+        <div class="stat-item">
+          <div class="stat-label">本轮进度</div>
+          <div class="stat-value">第 <span id="modalN">0</span>/13 抽</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">下抽成线概率</div>
+          <div class="stat-value" id="modalProb">0.00%</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">本轮累计花费</div>
+          <div class="stat-value small">⭐ <span id="modalCum">0</span></div>
+        </div>
+      </div>
+      <div class="panel-action">
+        <div class="action-btn" id="drawBtnPanel">
+          <div class="ab-label" id="abLabel">点 1 盏灯</div>
+          <div class="ab-cost" id="abCostRow">
+            <span class="star-icon"></span>
+            <span id="abActualCost">0</span>
+          </div>
+          <div class="ab-gain" id="abGain"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 大奖弹窗 -->
+  <div class="reward-modal" id="rewardModal">
+    <div class="reward-rays"></div>
+    <div class="reward-content">
+      <div class="reward-title">🎉 BINGO！</div>
+      <div class="reward-sub">连成一线，获得限定大奖</div>
+      <div class="reward-card">
+        <div class="reward-emoji" id="rewardEmoji">👧</div>
+        <div class="reward-name" id="rewardName">限定大奖</div>
+        <div class="reward-desc">第 <span id="hitDraw">?</span> 抽命中 · 第 <span id="roundNum">1</span> 轮奖励</div>
+      </div>
+      <div class="reward-btn" id="rewardBtn">领取并开启下一轮</div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+/* ============ 数值表 ============ */
+const TABLE = [
+  { n:1,  cost:0,   gift:0,  coupon:0, actual:0,   cumCost:0,   line:0,    cum:0,     p480:0,     p680:0    },
+  { n:2,  cost:10,  gift:7,  coupon:1, actual:0,   cumCost:0,   line:0,    cum:0,     p480:0,     p680:0    },
+  { n:3,  cost:20,  gift:11, coupon:3, actual:0,   cumCost:0,   line:0,    cum:0,     p480:0,     p680:0    },
+  { n:4,  cost:30,  gift:2,  coupon:1, actual:25,  cumCost:25,  line:0.53, cum:0.53,  p480:100,   p680:0    },
+  { n:5,  cost:40,  gift:0,  coupon:0, actual:40,  cumCost:65,  line:0.85, cum:1.38,  p480:94.5,  p680:5.5  },
+  { n:6,  cost:50,  gift:0,  coupon:0, actual:50,  cumCost:115, line:1.37, cum:2.75,  p480:92.33, p680:7.67 },
+  { n:7,  cost:60,  gift:0,  coupon:0, actual:60,  cumCost:175, line:2.20, cum:4.95,  p480:90.17, p680:9.83 },
+  { n:8,  cost:70,  gift:0,  coupon:0, actual:70,  cumCost:245, line:3.54, cum:8.49,  p480:88.0,  p680:12.0 },
+  { n:9,  cost:80,  gift:0,  coupon:0, actual:80,  cumCost:325, line:5.70, cum:14.18, p480:84.17, p680:15.83 },
+  { n:10, cost:90,  gift:0,  coupon:0, actual:90,  cumCost:415, line:9.17, cum:23.35, p480:80.33, p680:19.67 },
+  { n:11, cost:100, gift:0,  coupon:0, actual:100, cumCost:515, line:14.75,cum:38.09, p480:76.5,  p680:23.5 },
+  { n:12, cost:110, gift:0,  coupon:0, actual:110, cumCost:625, line:23.73,cum:61.82, p480:76.5,  p680:23.5 },
+  { n:13, cost:120, gift:0,  coupon:0, actual:120, cumCost:745, line:38.18,cum:100,   p480:0,     p680:100  }
+];
+const row = (n) => TABLE[n - 1];
+
+// 第 n 抽（n>=4）的条件成线概率（基于累积概率反推）
+function condLineProb(n) {
+  if (n <= 3) return 0;
+  if (n >= 13) return 1;
+  const cumPrev = row(n - 1).cum / 100;
+  return Math.max(0, Math.min(1, row(n).line / 100 / Math.max(1e-9, 1 - cumPrev)));
+}
+
+/* ============ 棋盘 / 连线定义 ============ */
+const LINES = [
+  [0,1,2,3], [4,5,6,7], [8,9,10,11], [12,13,14,15],     // 行
+  [0,4,8,12], [1,5,9,13], [2,6,10,14], [3,7,11,15],     // 列
+  [0,5,10,15], [3,6,9,12]                                // 对角
+];
+
+/* ============ 状态 ============ */
+let board = Array(16).fill(false);
+let drawN = 0;            // 已抽次数（下次抽奖为 drawN+1）
+let stars = 9999;
+let coins = 0;
+let coupons = 0;
+let round = 1;
+let totalLines = 0;
+let busy = false;
+let plannedLine = null;   // 前 3 抽锁定的目标线（cells 数组）
+let foundLines = [];      // 本轮已成线（cells 字符串集合）
+
+/* ============ DOM ============ */
+const $ = (id) => document.getElementById(id);
+
+function showToast(msg) {
+  $('toast').textContent = msg;
+  $('toast').classList.add('show');
+  setTimeout(() => $('toast').classList.remove('show'), 1500);
+}
+
+/* ============ 渲染 ============ */
+function renderMini() {
+  const mini = $('boardMini');
+  mini.innerHTML = '';
+  for (let i = 0; i < 16; i++) {
+    const c = document.createElement('div');
+    c.className = 'mini-cell' + (board[i] ? ' lit' : '');
+    mini.appendChild(c);
+  }
+}
+
+function renderGrid(justLitIdx) {
+  const grid = $('boardGrid');
+  grid.innerHTML = '';
+  for (let i = 0; i < 16; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'lamp-cell';
+    const lit = board[i];
+    cell.innerHTML =
+      '<div class="lamp' + (lit ? ' lit' : '') + (i === justLitIdx ? ' justlit' : '') +
+      '"><div class="lamp-body"><div class="lamp-face">···</div></div></div>';
+    grid.appendChild(cell);
+  }
+}
+
+function renderLinesSVG() {
+  const svg = $('lineSvg');
+  svg.innerHTML = '';
+  const cs = 86, gap = 12;
+  const center = (idx) => ({
+    x: (idx % 4) * (cs + gap) + cs / 2,
+    y: Math.floor(idx / 4) * (cs + gap) + cs / 2
+  });
+  foundLines.forEach(key => {
+    const line = LINES.find(l => l.join(',') === key);
+    if (!line) return;
+    const a = center(line[0]), b = center(line[3]);
+    const ns = 'http://www.w3.org/2000/svg';
+    const ln = document.createElementNS(ns, 'line');
+    ln.setAttribute('x1', a.x); ln.setAttribute('y1', a.y);
+    ln.setAttribute('x2', b.x); ln.setAttribute('y2', b.y);
+    svg.appendChild(ln);
+  });
+}
+
+function refreshMainHUD() {
+  $('star').textContent = stars;
+  $('coin').textContent = coins;
+  $('coupon').textContent = coupons;
+  $('curN').textContent = drawN;
+  $('progressText').textContent = board.filter(x => x).length + '/16';
+  $('cumCost').textContent = drawN <= 0 ? 0 : row(drawN).cumCost;
+  $('lineCount').textContent = totalLines;
+
+  // 主按钮成本提示
+  const next = drawN + 1;
+  if (next > 13) {
+    $('mainCostHint').textContent = '下一轮';
+  } else {
+    const r = row(next);
+    if (r.actual === 0 && r.cost > 0) {
+      $('mainCostHint').textContent = '免费 (赠 ⭐' + r.gift + ')';
+    } else if (r.cost === 0) {
+      $('mainCostHint').textContent = '免费首抽';
+    } else {
+      $('mainCostHint').textContent = r.actual.toString();
+    }
+  }
+}
+
+function refreshPanelHUD() {
+  const next = drawN + 1;
+  $('modalN').textContent = drawN;
+  $('modalCum').textContent = drawN <= 0 ? 0 : row(drawN).cumCost;
+
+  if (next > 13) {
+    $('modalProb').textContent = '—';
+    $('drawBtnPanel').classList.add('disabled');
+    $('abLabel').textContent = '本轮已结束';
+    $('abCostRow').style.display = 'none';
+    $('abGain').textContent = '';
+    return;
+  }
+  const r = row(next);
+  $('modalProb').textContent = r.line.toFixed(2) + '%';
+  $('drawBtnPanel').classList.remove('disabled', 'gain-style');
+  $('abLabel').textContent = '点 1 盏灯（第 ' + next + ' 抽）';
+  $('abCostRow').style.display = 'flex';
+
+  if (r.cost === 0) {
+    // 第 1 抽：免费
+    $('abActualCost').textContent = '免费';
+    $('abGain').textContent = '';
+  } else if (r.actual === 0 && r.gift > 0) {
+    // 2/3 抽：标价但实付为 0
+    $('abActualCost').innerHTML = '<span style="text-decoration:line-through;color:#aa8a7a;margin-right:4px">⭐' + r.cost + '</span>实付 0';
+    $('abGain').textContent = '✨ 赠 ⭐' + r.gift + (r.coupon > 0 ? ' + 🎫×' + r.coupon : '');
+    $('drawBtnPanel').classList.add('gain-style');
+  } else if (r.actual < r.cost) {
+    // 第 4 抽：30 标价但实付 25
+    $('abActualCost').innerHTML = '<span style="text-decoration:line-through;color:#aa8a7a;margin-right:4px">⭐' + r.cost + '</span>实付 ⭐' + r.actual;
+    $('abGain').textContent = (r.gift > 0 ? '✨ 赠 ⭐' + r.gift : '') + (r.coupon > 0 ? ' + 🎫×' + r.coupon : '');
+  } else {
+    $('abActualCost').textContent = '⭐ ' + r.actual;
+    $('abGain').textContent = '';
+  }
+}
+
+/* ============ 点亮规划逻辑 ============ */
+function litCells() {
+  const arr = [];
+  for (let i = 0; i < 16; i++) if (board[i]) arr.push(i);
+  return arr;
+}
+function unlit(line) { return line.filter(i => !board[i]); }
+function litCount(line) { return line.filter(i => board[i]).length; }
+
+// 选择"目标线"：覆盖最多已点格 + 剩余空位多 的线
+function pickTargetLine() {
+  // 已经成线过的、或全部点亮的线不选
+  let best = null, bestScore = -1;
+  for (const line of LINES) {
+    const lc = litCount(line);
+    if (lc === 4) continue;
+    // score: 已点位多更好；同分时随机抖动
+    const score = lc * 10 + Math.random();
+    if (score > bestScore) { bestScore = score; best = line; }
+  }
+  return best;
+}
+
+// 决定本抽要点亮哪一格
+function decideLightIndex(n) {
+  // n: 第几抽（1-13）
+  // 前 3 抽：构建目标线，使其有 3 子（差 1 即可成线）
+  if (n <= 3) {
+    if (!plannedLine) plannedLine = pickTargetLine();
+    // 选目标线中尚未点亮的格
+    const candidates = unlit(plannedLine);
+    if (candidates.length > 0) return candidates[Math.floor(Math.random() * candidates.length)];
+    // 兜底
+    return pickRandomEmpty();
+  }
+
+  // 第 4 抽起：
+  // - 若本抽要"成线"（受概率控制）：选某条 3 已点的线把最后 1 子补上
+  // - 否则：保证抽完后仍存在至少一条 "3 子已点" 的活线
+  // 注意：这个函数只决定"点哪一格"，是否成线由概率层在外部判断后告知。
+  // 这里只负责满足"差一子"的连线状态：
+  //   - 若指定 willComplete=true，则补成 4 子；
+  //   - 否则点别的位置，但保留至少一条 "3-of-4" 活线。
+  // willComplete 通过外层全局变量 _willCompleteThisDraw 传递
+  if (_willCompleteThisDraw) {
+    // 找一条 3 子已点 + 1 子未点 的线
+    const ready = LINES.filter(l => litCount(l) === 3 && !foundLines.includes(l.join(',')));
+    if (ready.length > 0) {
+      const target = ready[Math.floor(Math.random() * ready.length)];
+      const empty = unlit(target);
+      return empty[0];
+    }
+    // 没有 3 子线就退化为补足某条已有 3 子的线（异常分支）
+    return pickRandomEmpty();
+  }
+
+  // 不成线：要保证点亮后至少还有一条 "3-of-4" 活线
+  // 候选格：未点亮 & 不会唯一性断掉所有 3-子线
+  const empties = [];
+  for (let i = 0; i < 16; i++) if (!board[i]) empties.push(i);
+
+  // 先排除 "点了它会构成 4 子（成线）" 的格
+  const safe = empties.filter(idx => {
+    // 模拟点亮 idx
+    board[idx] = true;
+    const completes = LINES.some(l => litCount(l) === 4 && !foundLines.includes(l.join(',')));
+    board[idx] = false;
+    return !completes;
+  });
+
+  // 在 safe 中再优先选 "能让某条线达到 3 子" 的
+  const cellsExtendTo3 = safe.filter(idx => {
+    board[idx] = true;
+    const has3 = LINES.some(l => litCount(l) === 3);
+    board[idx] = false;
+    return has3;
+  });
+
+  let pool = cellsExtendTo3.length > 0 ? cellsExtendTo3 : safe;
+
+  // 如果当前已有 3 子线，且本抽不成线，则可以随便选一个 safe 格（保留原 3 子线即可）
+  const has3Now = LINES.some(l => litCount(l) === 3 && !foundLines.includes(l.join(',')));
+  if (has3Now) {
+    pool = safe.length > 0 ? safe : empties;
+  }
+  if (pool.length === 0) pool = empties;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function pickRandomEmpty() {
+  const empties = [];
+  for (let i = 0; i < 16; i++) if (!board[i]) empties.push(i);
+  return empties[Math.floor(Math.random() * empties.length)];
+}
+
+let _willCompleteThisDraw = false;
+
+/* ============ 抽奖核心 ============ */
+function doDraw() {
+  if (busy) return;
+  const n = drawN + 1;
+  if (n > 13) { showToast('已达 13 抽上限，开启下一轮'); startNewRound(); return; }
+  const r = row(n);
+
+  // 扣星币
+  if (r.actual > 0 && stars < r.actual) {
+    showToast('星币不足');
+    return;
+  }
+  busy = true;
+
+  if (r.actual > 0) stars -= r.actual;
+  if (r.gift > 0) stars += r.gift;
+  if (r.coupon > 0) coupons += r.coupon;
+
+  drawN = n;
+
+  // 决定是否成线
+  let willHit = false;
+  if (n >= 4) {
+    if (n === 13) {
+      willHit = true;
+    } else {
+      willHit = Math.random() < condLineProb(n);
+    }
+  }
+  _willCompleteThisDraw = willHit;
+
+  // 决定点亮哪格
+  let idx = decideLightIndex(n);
+
+  // 兜底：n>=4 且 willHit=true 时必须存在 3 子线；若不存在，先点出 3 子线（理论上规划足够不会触发，但保险）
+  if (willHit) {
+    const ready = LINES.find(l => litCount(l) === 3 && !foundLines.includes(l.join(',')));
+    if (!ready) {
+      // 没 3 子线，本抽降级为不成线
+      willHit = false;
+      _willCompleteThisDraw = false;
+      idx = decideLightIndex(n);
+    } else {
+      idx = ready.find(i => !board[i]);
+    }
+  }
+
+  // 点亮动画
+  board[idx] = true;
+  renderGrid(idx);
+  renderMini();
+  renderLinesSVG();
+
+  // 检查成线（基于实际状态）
+  const newLine = LINES.find(l =>
+    l.every(i => board[i]) && !foundLines.includes(l.join(','))
+  );
+
+  setTimeout(() => {
+    if (newLine) {
+      foundLines.push(newLine.join(','));
+      totalLines++;
+      drawLineSVG(newLine);
+      // 大奖类型：根据数值表决定是 480 还是 680
+      const is680 = Math.random() * 100 < r.p680;
+      $('rewardName').textContent = is680
+        ? '高级大奖（B 档）'
+        : '基础大奖（A 档）';
+      $('rewardEmoji').textContent = is680 ? '🌟' : '👧';
+      $('hitDraw').textContent = n;
+      $('roundNum').textContent = round;
+      setTimeout(() => {
+        $('rewardModal').classList.add('show');
+      }, 700);
+    }
+    refreshMainHUD();
+    refreshPanelHUD();
+    busy = false;
+  }, 500);
+}
+
+function drawLineSVG(line) {
+  const svg = $('lineSvg');
+  const cs = 86, gap = 12;
+  const center = (idx) => ({
+    x: (idx % 4) * (cs + gap) + cs / 2,
+    y: Math.floor(idx / 4) * (cs + gap) + cs / 2
+  });
+  const a = center(line[0]), b = center(line[3]);
+  const ns = 'http://www.w3.org/2000/svg';
+  const ln = document.createElementNS(ns, 'line');
+  ln.setAttribute('x1', a.x); ln.setAttribute('y1', a.y);
+  ln.setAttribute('x2', b.x); ln.setAttribute('y2', b.y);
+  svg.appendChild(ln);
+}
+
+/* ============ 轮次 ============ */
+function startNewRound() {
+  round++;
+  board = Array(16).fill(false);
+  drawN = 0;
+  foundLines = [];
+  plannedLine = null;
+  $('lineSvg').innerHTML = '';
+  renderGrid();
+  renderMini();
+  refreshMainHUD();
+  refreshPanelHUD();
+  showToast('🎊 进入第 ' + round + ' 轮');
+}
+
+function openModal() {
+  renderGrid();
+  renderLinesSVG();
+  refreshPanelHUD();
+  $('boardModal').classList.add('show');
+}
+function closeModal() {
+  if (busy) return;
+  $('boardModal').classList.remove('show');
+}
+
+/* ============ 事件 ============ */
+$('drawBtnMain').addEventListener('click', () => {
+  openModal();
+  // 主界面按钮：打开后立刻执行一次抽奖
+  setTimeout(() => doDraw(), 280);
+});
+$('drawBtnPanel').addEventListener('click', (e) => {
+  e.stopPropagation();
+  doDraw();
+});
+$('closeBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  closeModal();
+});
+$('boardMini').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (busy) return;
+  openModal();
+});
+
+// 棋盘弹窗背景层不再自动关闭（保留点击穿透到关闭按钮以外不响应）
+$('boardModal').addEventListener('click', (e) => {
+  // 仅当点击 modal 黑色蒙层（不在 panel 上）时关闭
+  if (e.target.id === 'boardModal' && !busy) closeModal();
+});
+
+$('rewardBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('rewardModal').classList.remove('show');
+  // 关闭奖励弹窗后停留在棋盘界面，玩家可以选择关闭或开启新一轮
+  // 自动开启新一轮：
+  setTimeout(() => startNewRound(), 200);
+});
+
+/* ============ 启动 ============ */
+renderGrid();
+renderMini();
+refreshMainHUD();
+refreshPanelHUD();
+</script>
+</body>
+</html>
