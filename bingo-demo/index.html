@@ -1312,6 +1312,22 @@ function decideLightIndex(n) {
     baseLit[li] === 3 && !foundLines.includes(l.join(','))
   ).length;
 
+  // 收集所有"3-of-4 活线"的缺口格（这些是"差一子可中"的诱饵格）
+  const lureGaps = [];
+  LINES.forEach((l, li) => {
+    if (baseLit[li] === 3 && !foundLines.includes(l.join(','))) {
+      const gap = l.find(i => !board[i]);
+      if (gap !== undefined) lureGaps.push(gap);
+    }
+  });
+  // 缺口对应的"同行/同列"格集合（target 落入这里 ⇒ 滚动时缺口会作为诱饵出现在锁定方向内）
+  const lureRowsCols = new Set();
+  for (const g of lureGaps) {
+    const gr = Math.floor(g / 4), gc = g % 4;
+    for (let c = 0; c < 4; c++) lureRowsCols.add(gr * 4 + c);
+    for (let r = 0; r < 4; r++) lureRowsCols.add(r * 4 + gc);
+  }
+
   const scored = safe.map(idx => {
     board[idx] = true;
 
@@ -1336,16 +1352,21 @@ function decideLightIndex(n) {
     let score = 0;
     // ★ A. 保证活线（最高优先级）
     if (afterReady === 0) {
-      score -= 8000;            // 重罚：点完后棋盘没"差一子"线 = 体验灾难
+      score -= 8000;
     } else if (afterReady === 1) {
       score += 600;
     } else if (afterReady === 2) {
-      score += 900;             // 最甜蜜区间：2 条活线悬念最足
+      score += 900;
     } else if (afterReady === 3) {
       score += 700;
     } else {
-      // ≥4 条会把空格封死，惩罚梯度
       score += 300 - (afterReady - 3) * 200;
+    }
+
+    // ★ A+. target 落入"缺口同行 ∪ 缺口同列"的奖励
+    // 这样滚动时锁定的行/列内会出现诱饵，玩家能看到"差点中"
+    if (lureGaps.length > 0 && lureRowsCols.has(idx)) {
+      score += 500;
     }
 
     // ★ B. 升级潜在线
@@ -1535,95 +1556,82 @@ function rollAnimation(targetIdx, onDone) {
     }
   }
 
-  /* ===== 智能阶段选择 =====
-   * 设计理念：让动画的每一阶段都"有意义"——
-   *   - 阶段 A（行扫描+定排）：当 target 行的"已点亮 + target"会让某条横线达到 ≥3 子时，做行扫描有悬念
-   *   - 阶段 B（列扫描+定列）：当 target 列已有 ≥2 子时，做列扫描有"差点列成"感
-   * 注：在 4×4 棋盘里，落在 (r,c) 等价于"补强了第 r 行 + 第 c 列"，
-   *   - 若两者都不悬念（例如 target 是孤立角）：仅做一次快速行扫描后定行，列内随机闪烁停 target
-   *   - 若两者都悬念：先行扫描定行，再列扫描定列（target=两者交点）
-   *   - 若只有行悬念：只行扫描
-   *   - 若只有列悬念：只列扫描
-   */
-  const targetRowLitCount = [0,1,2,3].filter(c => board[targetRow * 4 + c]).length; // 不含 target
-  const targetColLitCount = [0,1,2,3].filter(r => board[r * 4 + targetCol]).length; // 不含 target
-  // "悬念" = 落入此行/列后能让该线达到至少 2 子（即和已有点连接）
-  const rowMeaningful = targetRowLitCount >= 1;
-  const colMeaningful = targetColLitCount >= 1;
-  // 两者都不悬念时退化为只走行扫描（保留基础节奏）
-  const playRowPhase = rowMeaningful || (!rowMeaningful && !colMeaningful);
-  const playColPhase = colMeaningful;
-
-  /* ===== 阶段 1：排扫描定排 ===== */
+  /* ===== 阶段 1：行扫描（始终播放） =====
+   * 4 行 × 2 圈高速 → 4 步中速 → 不在这里停
+   * （定位决策交给阶段 2 之间的"二选一"切换） */
   const rowSteps = [];
-  if (playRowPhase) {
-    // 高速 2 圈
-    for (let loop = 0; loop < 2; loop++) {
-      for (let r = 0; r < 4; r++) rowSteps.push({ r, delay: 90 });
-    }
-    // 中速过渡到 targetRow
-    let cursor = 0;
-    const slowRowDelays = [120, 150, 180, 220];
-    for (let k = 0; k < slowRowDelays.length; k++) {
-      cursor = (cursor + 1) % 4;
-      rowSteps.push({ r: cursor, delay: slowRowDelays[k] });
-    }
-    // 最后稳稳停在 targetRow
-    rowSteps.push({ r: targetRow, delay: 280 });
+  for (let loop = 0; loop < 2; loop++) {
+    for (let r = 0; r < 4; r++) rowSteps.push({ r, delay: 90 });
+  }
+  const slowRowDelays = [110, 140, 170, 200];
+  let rcursor = 0;
+  for (const d of slowRowDelays) {
+    rcursor = (rcursor + 1) % 4;
+    rowSteps.push({ r: rcursor, delay: d });
   }
 
-  /* ===== 阶段 2：列扫描定列（仅在列也有意义时） ===== */
+  /* ===== 阶段 2：列扫描（始终播放） ===== */
   const colPhaseSteps = [];
-  if (playColPhase) {
-    // 高速 4 列循环 1.5 圈
-    for (let loop = 0; loop < 1; loop++) {
-      for (let c = 0; c < 4; c++) colPhaseSteps.push({ c, delay: 90 });
-    }
-    for (let c = 0; c < 2; c++) colPhaseSteps.push({ c, delay: 100 });
-    // 中速过渡到 targetCol
-    let cursor = 1;
-    const slowColDelays = [130, 165, 210];
-    for (const d of slowColDelays) {
-      cursor = (cursor + 1) % 4;
-      colPhaseSteps.push({ c: cursor, delay: d });
-    }
-    // 稳稳停在 targetCol
-    colPhaseSteps.push({ c: targetCol, delay: 260 });
+  for (let loop = 0; loop < 2; loop++) {
+    for (let c = 0; c < 4; c++) colPhaseSteps.push({ c, delay: 90 });
+  }
+  const slowColDelays = [110, 140, 170, 200];
+  let ccursor = 0;
+  for (const d of slowColDelays) {
+    ccursor = (ccursor + 1) % 4;
+    colPhaseSteps.push({ c: ccursor, delay: d });
   }
 
-  /* ===== 阶段 3：在"锁定的行/列范围内的未点亮格"上滚动 =====
-   * 范围规则：
-   *   - 行列都锁定 → 行 ∪ 列的未点亮格（target 必含）
-   *   - 仅行锁定   → 该行的未点亮格
-   *   - 仅列锁定   → 该列的未点亮格
-   *   - 都没锁定   → 全棋盘未点亮格
-   * 不再跨非锁定的行/列做闪烁。
+  /* ===== 阶段 3：二选一锁定行 OR 列 =====
+   * 决策：在 target 所在行 vs 所在列里，挑"未点亮格里包含的诱饵更多"那个方向。
+   * 诱饵 = 该方向上点亮后能成 4 子的缺口（lureA），其次是能升 2→3（lureB）。
+   * 同分时优先选未点亮格更多的那个方向（视觉空间更大）。
+   * 若两个方向都没诱饵且未点亮格 ≤ 1，则选未点亮格多的方向。
    */
-  const scopeIdx = (() => {
-    const set = new Set();
-    if (playRowPhase) {
-      for (let c = 0; c < 4; c++) {
-        const i = targetRow * 4 + c;
-        if (!board[i]) set.add(i);
-      }
-    }
-    if (playColPhase) {
-      for (let r = 0; r < 4; r++) {
-        const i = r * 4 + targetCol;
-        if (!board[i]) set.add(i);
-      }
-    }
-    if (!playRowPhase && !playColPhase) {
-      for (let i = 0; i < 16; i++) if (!board[i]) set.add(i);
-    }
-    set.add(targetIdx);
-    return Array.from(set);
-  })();
+  const rowEmptySet = [];
+  const colEmptySet = [];
+  for (let c = 0; c < 4; c++) {
+    const i = targetRow * 4 + c;
+    if (!board[i]) rowEmptySet.push(i);
+  }
+  for (let r = 0; r < 4; r++) {
+    const i = r * 4 + targetCol;
+    if (!board[i]) colEmptySet.push(i);
+  }
 
-  // 在 scope 内识别"诱饵格"：点亮后能让某条线变 4 子（差一子可成线）
-  const lureA = []; // 一级诱饵
-  const lureB = []; // 二级诱饵：能升级 2→3 子线
-  for (const i of scopeIdx) {
+  function lureScore(emptyArr) {
+    let A = 0, B = 0;
+    for (const i of emptyArr) {
+      if (i === targetIdx) continue;
+      board[i] = true;
+      const a = LINES.some(l => litCount(l) === 4 && !foundLines.includes(l.join(',')));
+      const b = LINES.some(l => litCount(l) === 3 && !foundLines.includes(l.join(','))); // 含 a 情况
+      board[i] = false;
+      if (a) A++;
+      else if (b) B++;
+    }
+    return { A, B, size: emptyArr.length };
+  }
+  const rowL = lureScore(rowEmptySet);
+  const colL = lureScore(colEmptySet);
+
+  // 选行 vs 选列
+  let lockKind;
+  if (rowL.A !== colL.A) lockKind = rowL.A > colL.A ? 'row' : 'col';
+  else if (rowL.B !== colL.B) lockKind = rowL.B > colL.B ? 'row' : 'col';
+  else if (rowL.size !== colL.size) lockKind = rowL.size > colL.size ? 'row' : 'col';
+  else lockKind = Math.random() < 0.5 ? 'row' : 'col';
+
+  /* ===== 阶段 4：在锁定方向的"未点亮格"上做"灰↔次亮"滚动 ===== */
+  // 锁定方向的未点亮格集合（target 必含）
+  const scopeEmpties = (lockKind === 'row' ? rowEmptySet : colEmptySet).slice();
+  if (!scopeEmpties.includes(targetIdx)) scopeEmpties.push(targetIdx);
+  scopeEmpties.sort((a, b) => a - b);
+
+  // 在 scope 内识别诱饵
+  const lureA = [];
+  const lureB = [];
+  for (const i of scopeEmpties) {
     if (i === targetIdx) continue;
     board[i] = true;
     const a = LINES.some(l => litCount(l) === 4 && !foundLines.includes(l.join(',')));
@@ -1635,22 +1643,22 @@ function rollAnimation(targetIdx, onDone) {
 
   const cellSteps = [];
 
-  // 高速来回扫（只在 scope 内）
-  if (scopeIdx.length >= 2) {
+  // 高速来回扫（仅在锁定方向的未点亮格内）
+  if (scopeEmpties.length >= 2) {
     const fast = [];
-    const ordered = [...scopeIdx].sort((a, b) => a - b);
     for (let k = 0; k < 2; k++) {
-      for (const i of ordered) fast.push(i);
-      for (let m = ordered.length - 2; m >= 1; m--) fast.push(ordered[m]);
+      for (const i of scopeEmpties) fast.push(i);
+      for (let m = scopeEmpties.length - 2; m >= 1; m--) fast.push(scopeEmpties[m]);
     }
     fast.forEach(i => cellSteps.push({ idx: i, delay: 75 }));
   } else {
-    cellSteps.push({ idx: scopeIdx[0], delay: 75 });
+    // 该方向只有 1 格未点亮（就是 target）
+    cellSteps.push({ idx: targetIdx, delay: 90 });
   }
 
   // 中速段：诱饵 ↔ target 交替
-  const midDelays = [110, 140, 175, 215, 260];
-  for (let k = 0; k < midDelays.length; k++) {
+  const midDelaysCell = [110, 140, 175, 215, 260];
+  for (let k = 0; k < midDelaysCell.length; k++) {
     let pickIdx;
     if (k % 2 === 0 && lureA.length > 0) {
       pickIdx = lureA[Math.floor(Math.random() * lureA.length)];
@@ -1659,12 +1667,12 @@ function rollAnimation(targetIdx, onDone) {
     } else if (lureB.length > 0) {
       pickIdx = lureB[Math.floor(Math.random() * lureB.length)];
     } else {
-      pickIdx = scopeIdx[Math.floor(Math.random() * scopeIdx.length)];
+      pickIdx = scopeEmpties[Math.floor(Math.random() * scopeEmpties.length)];
     }
-    cellSteps.push({ idx: pickIdx, delay: midDelays[k] });
+    cellSteps.push({ idx: pickIdx, delay: midDelaysCell[k] });
   }
 
-  // 慢速段：在 诱饵 ↔ target 之间反复跳，最后咬合
+  // 慢速段：诱饵 ↔ target 反复跳，最后咬合
   if (lureA.length > 0) {
     const lc = lureA[Math.floor(Math.random() * lureA.length)];
     cellSteps.push({ idx: lc,        delay: 320 });
@@ -1677,7 +1685,7 @@ function rollAnimation(targetIdx, onDone) {
     cellSteps.push({ idx: targetIdx, delay: 380 });
     cellSteps.push({ idx: targetIdx, delay: 440 });
   } else {
-    const others = scopeIdx.filter(i => i !== targetIdx);
+    const others = scopeEmpties.filter(i => i !== targetIdx);
     if (others.length > 0) {
       const o = others[Math.floor(Math.random() * others.length)];
       cellSteps.push({ idx: o,         delay: 320 });
@@ -1728,11 +1736,13 @@ function rollAnimation(targetIdx, onDone) {
     }
     const cur = phases[pIdx];
     if (sIdx >= cur.steps.length) {
-      // 阶段切换：上锁 + 暂停一拍
+      // 阶段切换：根据 lockKind 决定上锁哪个方向
       clearAll('spinning');
-      if (cur.kind === 'row') setRowLocked(targetRow);
-      else if (cur.kind === 'col') setColLocked(targetCol);
-      // cell 阶段会在锁定的行/列范围内跳，保留 row-locked / col-locked 高亮
+      // 行/列阶段结束都不锁；col 阶段结束后才执行最终二选一锁定
+      if (cur.kind === 'col') {
+        if (lockKind === 'row') setRowLocked(targetRow);
+        else setColLocked(targetCol);
+      }
       pIdx++;
       sIdx = 0;
       setTimeout(next, 220);
