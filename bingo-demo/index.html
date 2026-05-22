@@ -412,15 +412,8 @@
     100% { transform: translateX(-50%) scale(1.2); filter: brightness(1.3); }
   }
 
-  /* 棋盘整体抖动 */
-  .board-grid.rolling {
-    animation: rollShake 0.18s ease-in-out infinite;
-  }
-  @keyframes rollShake {
-    0%, 100% { transform: translateX(0); }
-    25%      { transform: translateX(-2px); }
-    75%      { transform: translateX(2px); }
-  }
+  /* 棋盘整体抖动（已禁用，仅保留滚动高亮） */
+  .board-grid.rolling { /* no shake */ }
 
   /* 顶部"抽奖中"提示 */
   .roll-hint {
