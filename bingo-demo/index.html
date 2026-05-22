@@ -1411,69 +1411,104 @@ function doDraw() {
 }
 
 /* ============ 宾果机跳动动画 ============ */
-// 在真正点亮前，做一个先快后慢的候选格闪烁滚动
+// 节奏：① 整行高速扫描多圈 → ② 逐格中速扫一圈 → ③ 在"能成线"的候选格之间悬停忽快忽慢 → ④ 锁定 target
 function rollAnimation(targetIdx, onDone) {
   const grid = $('boardGrid');
   const hint = $('rollHint');
-  grid.classList.add('rolling');
   hint.classList.add('show');
 
-  // 候选池：所有未点亮的格 + 目标格
-  const empties = [];
-  for (let i = 0; i < 16; i++) if (!board[i]) empties.push(i);
-  // 确保 target 在池里
-  if (!empties.includes(targetIdx)) empties.push(targetIdx);
-
-  // 节奏序列：从快到慢的间隔（毫秒），最后一个值即停在 target
-  const intervals = [60, 60, 60, 60, 70, 80, 90, 110, 130, 160, 200, 250, 320];
-  let step = 0;
-  let prev = -1;
-
-  function clearSpin(idx) {
-    if (idx < 0) return;
+  function getLamp(idx) {
     const cell = grid.children[idx];
-    if (cell) cell.querySelector('.lamp')?.classList.remove('spinning');
+    return cell ? cell.querySelector('.lamp') : null;
+  }
+  function clearAllSpin() {
+    for (let i = 0; i < 16; i++) {
+      const l = getLamp(i);
+      if (l) l.classList.remove('spinning');
+    }
   }
   function highlight(idx) {
-    const cell = grid.children[idx];
-    if (cell) cell.querySelector('.lamp')?.classList.add('spinning');
+    clearAllSpin();
+    const l = getLamp(idx);
+    if (l) l.classList.add('spinning');
+  }
+  function highlightRow(rowIdx) {
+    clearAllSpin();
+    for (let c = 0; c < 4; c++) {
+      const l = getLamp(rowIdx * 4 + c);
+      if (l) l.classList.add('spinning');
+    }
   }
 
-  function tick() {
-    clearSpin(prev);
-    let idx;
-    if (step < intervals.length - 1) {
-      // 随机选一个候选，避免连续相同
-      do {
-        idx = empties[Math.floor(Math.random() * empties.length)];
-      } while (idx === prev && empties.length > 1);
-    } else {
-      idx = targetIdx;
-    }
-    highlight(idx);
-    prev = idx;
+  // 计算"成线候选格"：未点亮 & 点亮后能让某条线达到 3 子（差 1 子可成线）
+  // 这是悬念阶段的"亮点"格子，慢速时多在这上面停
+  const lineCandidates = [];
+  for (let i = 0; i < 16; i++) {
+    if (board[i]) continue;
+    board[i] = true;
+    const has3 = LINES.some(l => l.filter(x => board[x]).length >= 3 && !foundLines.includes(l.join(',')));
+    board[i] = false;
+    if (has3) lineCandidates.push(i);
+  }
+  // 兜底：如果没有候选，就用 target 自己
+  const candidates = lineCandidates.length > 0 ? lineCandidates : [targetIdx];
+  // 确保 target 在候选里
+  if (!candidates.includes(targetIdx)) candidates.push(targetIdx);
 
-    if (step >= intervals.length - 1) {
+  // 步骤序列（每步：{type, idx, delay}）
+  const steps = [];
+
+  // ① 行扫描高速阶段：4 行 × 3 圈，每行 60ms
+  for (let loop = 0; loop < 3; loop++) {
+    for (let r = 0; r < 4; r++) {
+      steps.push({ type: 'row', idx: r, delay: 60 });
+    }
+  }
+
+  // ② 逐格中速扫描一圈：从 0 → 15，间隔 75ms
+  for (let i = 0; i < 16; i++) {
+    steps.push({ type: 'cell', idx: i, delay: 75 });
+  }
+
+  // ③ 候选悬停阶段：在 candidates 中跳动，间隔逐渐变慢
+  // 让 target 出现的频率逐步增加
+  const slowIntervals = [110, 130, 160, 200, 250, 320, 400];
+  for (let k = 0; k < slowIntervals.length; k++) {
+    let pickIdx;
+    if (k === slowIntervals.length - 1) {
+      pickIdx = targetIdx;
+    } else if (k >= slowIntervals.length - 3) {
+      // 末段：80% 概率落在 target，20% 落在其他候选
+      pickIdx = Math.random() < 0.8 ? targetIdx :
+        candidates[Math.floor(Math.random() * candidates.length)];
+    } else {
+      // 中段：在候选间随机
+      pickIdx = candidates[Math.floor(Math.random() * candidates.length)];
+    }
+    steps.push({ type: 'cell', idx: pickIdx, delay: slowIntervals[k] });
+  }
+
+  // 串行执行
+  let i = 0;
+  function next() {
+    if (i >= steps.length) {
       // 锁定爆光
-      const cell = grid.children[idx];
-      const lamp = cell?.querySelector('.lamp');
+      clearAllSpin();
+      const lamp = getLamp(targetIdx);
       if (lamp) {
-        lamp.classList.remove('spinning');
         lamp.classList.add('locking');
+        setTimeout(() => lamp.classList.remove('locking'), 480);
       }
-      grid.classList.remove('rolling');
       hint.classList.remove('show');
-      setTimeout(() => {
-        if (lamp) lamp.classList.remove('locking');
-        onDone();
-      }, 480);
+      setTimeout(onDone, 480);
       return;
     }
-    step++;
-    setTimeout(tick, intervals[step]);
+    const s = steps[i++];
+    if (s.type === 'row') highlightRow(s.idx);
+    else highlight(s.idx);
+    setTimeout(next, s.delay);
   }
-
-  setTimeout(tick, intervals[0]);
+  next();
 }
 
 function drawLineSVG(line) {
