@@ -461,11 +461,13 @@
   }
 
   /* 排锁定（已定排，整排淡淡高亮） */
-  .lamp.row-locked .lamp-body {
+  .lamp.row-locked .lamp-body,
+  .lamp.col-locked .lamp-body {
     background: radial-gradient(circle at 30% 30%, #fff5dc, #ffe2a8 60%, #ffc878 100%);
     box-shadow: 0 0 8px rgba(255,200,120,0.6);
   }
-  .lamp.row-locked .lamp-face { color: #b88018; }
+  .lamp.row-locked .lamp-face,
+  .lamp.col-locked .lamp-face { color: #b88018; }
 
   /* 顶部"抽奖中"提示 */
   .roll-hint {
@@ -1299,8 +1301,18 @@ function decideLightIndex(n) {
     return !completes;
   });
 
-  // 给每个 safe 候选打分，优先"和已有点连接、能扩展更多 3-子 / 2-子线"的格子
+  // 给每个 safe 候选打分。
+  // 关键策略：限制场上"差 1 子可成线"(3-of-4 ready)的线数，避免把所有空格都封死。
+  // - readyCount 已 >= 3 时，new3 转为负权（鼓励"非开新线"的延伸）
+  // - 优先选 new2（让 2-of-4 越来越多，增加视觉悬念）
+  // - 鼓励"和已有点共线"，惩罚孤立起点
   const baseLit = LINES.map(l => litCount(l));
+  const readyNow = LINES.filter((l, li) =>
+    baseLit[li] === 3 && !foundLines.includes(l.join(','))
+  ).length;
+  const new3Weight = readyNow >= 3 ? -200 : 1000;
+  const new2Weight = readyNow >= 3 ? 80 : 50;
+
   const scored = safe.map(idx => {
     board[idx] = true;
     let new3 = 0, new2 = 0, fromIsolated = 0;
@@ -1311,13 +1323,11 @@ function decideLightIndex(n) {
       else if (baseLit[li] === 1 && lit === 2) new2++;
       else if (baseLit[li] === 0 && lit === 1) fromIsolated++;
     });
-    // 检查这一格是否与某个已点亮的格"相邻"（共享同一条线）
     for (const l of LINES) {
       if (l.includes(idx) && l.some(j => j !== idx && board[j])) { touchExisting = true; break; }
     }
     board[idx] = false;
-    // 评分：升 3 子最重要 → 升 2 子次之 → 必须与已有点共享线（连接性）→ 凭空孤立点惩罚
-    let score = new3 * 1000 + new2 * 50 + (touchExisting ? 20 : 0) - fromIsolated * 30;
+    let score = new3 * new3Weight + new2 * new2Weight + (touchExisting ? 20 : 0) - fromIsolated * 30;
     score += Math.random();
     return { idx, score, new3, new2 };
   });
@@ -1375,6 +1385,22 @@ function doDraw() {
   _willCompleteThisDraw = willHit;
 
   let idx = decideLightIndex(n);
+
+  // 兜底翻车保护：如果 miss 但所有空格都会引发 4 子（safe 为空），说明算法逼死自己，强制把这一抽变成"成线"
+  if (!willHit) {
+    const empties = [];
+    for (let i = 0; i < 16; i++) if (!board[i]) empties.push(i);
+    const noSafe = empties.every(i => {
+      board[i] = true;
+      const completes = LINES.some(l => litCount(l) === 4 && !foundLines.includes(l.join(',')));
+      board[i] = false;
+      return completes;
+    });
+    if (noSafe) {
+      willHit = true;
+      _willCompleteThisDraw = true;
+    }
+  }
 
   if (willHit) {
     const ready = LINES.find(l => litCount(l) === 3 && !foundLines.includes(l.join(',')));
@@ -1477,111 +1503,170 @@ function rollAnimation(targetIdx, onDone) {
     }
   }
 
+  /* ===== 智能阶段选择 =====
+   * 设计理念：让动画的每一阶段都"有意义"——
+   *   - 阶段 A（行扫描+定排）：当 target 行的"已点亮 + target"会让某条横线达到 ≥3 子时，做行扫描有悬念
+   *   - 阶段 B（列扫描+定列）：当 target 列已有 ≥2 子时，做列扫描有"差点列成"感
+   * 注：在 4×4 棋盘里，落在 (r,c) 等价于"补强了第 r 行 + 第 c 列"，
+   *   - 若两者都不悬念（例如 target 是孤立角）：仅做一次快速行扫描后定行，列内随机闪烁停 target
+   *   - 若两者都悬念：先行扫描定行，再列扫描定列（target=两者交点）
+   *   - 若只有行悬念：只行扫描
+   *   - 若只有列悬念：只列扫描
+   */
+  const targetRowLitCount = [0,1,2,3].filter(c => board[targetRow * 4 + c]).length; // 不含 target
+  const targetColLitCount = [0,1,2,3].filter(r => board[r * 4 + targetCol]).length; // 不含 target
+  // "悬念" = 落入此行/列后能让该线达到至少 2 子（即和已有点连接）
+  const rowMeaningful = targetRowLitCount >= 1;
+  const colMeaningful = targetColLitCount >= 1;
+  // 两者都不悬念时退化为只走行扫描（保留基础节奏）
+  const playRowPhase = rowMeaningful || (!rowMeaningful && !colMeaningful);
+  const playColPhase = colMeaningful;
+
   /* ===== 阶段 1：排扫描定排 ===== */
-  // 整排高速亮一次（4 行 × 2.5 圈），逐渐变慢，最后停在 targetRow
   const rowSteps = [];
-  // 高速 2 圈
-  for (let loop = 0; loop < 2; loop++) {
-    for (let r = 0; r < 4; r++) rowSteps.push({ r, delay: 90 });
+  if (playRowPhase) {
+    // 高速 2 圈
+    for (let loop = 0; loop < 2; loop++) {
+      for (let r = 0; r < 4; r++) rowSteps.push({ r, delay: 90 });
+    }
+    // 中速过渡到 targetRow
+    let cursor = 0;
+    const slowRowDelays = [120, 150, 180, 220];
+    for (let k = 0; k < slowRowDelays.length; k++) {
+      cursor = (cursor + 1) % 4;
+      rowSteps.push({ r: cursor, delay: slowRowDelays[k] });
+    }
+    // 最后稳稳停在 targetRow
+    rowSteps.push({ r: targetRow, delay: 280 });
   }
-  // 中速从 0 → targetRow（再加几次摇摆），最后停 targetRow
-  // 让最后一步落在 targetRow 上
-  let cursor = 0;
-  const slowRowDelays = [120, 150, 180, 220, 280];
-  for (let i = 0; i < slowRowDelays.length - 1; i++) {
-    cursor = (cursor + 1) % 4;
-    rowSteps.push({ r: cursor, delay: slowRowDelays[i] });
+
+  /* ===== 阶段 2：列扫描定列（仅在列也有意义时） ===== */
+  const colPhaseSteps = [];
+  if (playColPhase) {
+    // 高速 4 列循环 1.5 圈
+    for (let loop = 0; loop < 1; loop++) {
+      for (let c = 0; c < 4; c++) colPhaseSteps.push({ c, delay: 90 });
+    }
+    for (let c = 0; c < 2; c++) colPhaseSteps.push({ c, delay: 100 });
+    // 中速过渡到 targetCol
+    let cursor = 1;
+    const slowColDelays = [130, 165, 210];
+    for (const d of slowColDelays) {
+      cursor = (cursor + 1) % 4;
+      colPhaseSteps.push({ c: cursor, delay: d });
+    }
+    // 稳稳停在 targetCol
+    colPhaseSteps.push({ c: targetCol, delay: 260 });
   }
-  // 最后稳稳停在 targetRow
-  rowSteps.push({ r: targetRow, delay: slowRowDelays[slowRowDelays.length - 1] });
 
-  /* ===== 阶段 2：行内列扫描 + 过站惯性 ===== */
-  // 在 target 所在行的 4 个格中扫，由快到慢
-  // 整体节奏：快速来回 1 轮 → 中速朝向 target 移动 → 在 target 前一格慢下 → 经过 target 不停 → 走 1~2 步 → 折返 → 最终稳稳停 target
-  const colSteps = [];
-  // 高速来回 1 轮（4-2-3-1-0...）
-  const fastSeq = [0, 1, 2, 3, 2, 1, 0, 1, 2, 3];
-  fastSeq.forEach(c => colSteps.push({ c, delay: 70 }));
+  /* ===== 阶段 3：在 target 所在行的"未点亮格"中滚动并停在 target =====
+   * 关键：跳过已点亮的格（用户要求），并加入过站惯性
+   */
+  // 该行的未点亮格集合（包含 target）
+  const rowEmpties = [];
+  for (let c = 0; c < 4; c++) {
+    const idx = targetRow * 4 + c;
+    if (!board[idx] || idx === targetIdx) rowEmpties.push(c);
+  }
+  // 在该 list 上做"快→慢→过站→折返→停"的运动
+  // target 在 rowEmpties 中的索引
+  const tIdx = rowEmpties.indexOf(targetCol);
+  const cellSteps = [];
 
-  // 中速朝 target 移动
-  // 起点：fastSeq 末尾是 3，从 3 朝 targetCol 走（顺/逆按距离）
-  let pos = 3;
+  // 高速来回扫
+  if (rowEmpties.length >= 2) {
+    const fast = [];
+    for (let k = 0; k < 2; k++) {
+      for (let i = 0; i < rowEmpties.length; i++) fast.push(rowEmpties[i]);
+      for (let i = rowEmpties.length - 2; i >= 1; i--) fast.push(rowEmpties[i]);
+    }
+    fast.forEach(c => cellSteps.push({ c, delay: 75 }));
+  }
+
+  // 中速朝 target 收敛
+  let pos = cellSteps.length > 0 ? cellSteps[cellSteps.length - 1].c : rowEmpties[0];
   const midDelays = [110, 140, 175, 215];
   for (const d of midDelays) {
-    if (pos < targetCol) pos++;
-    else if (pos > targetCol) pos--;
-    colSteps.push({ c: pos, delay: d });
+    // 在 rowEmpties 内朝 targetCol 移动一步
+    const curIdx = rowEmpties.indexOf(pos);
+    if (curIdx < tIdx) pos = rowEmpties[curIdx + 1];
+    else if (curIdx > tIdx) pos = rowEmpties[curIdx - 1];
+    cellSteps.push({ c: pos, delay: d });
   }
-  // 此时 pos === targetCol（target 上）
 
-  // ⭐ 关键：过站惯性
-  //   不要在 target 上停下，再走一步 / 两步过去
-  //   然后慢速折返
-  const overshootDir = targetCol < 3 ? 1 : -1;  // 优先往后走（如果 target 在右边界则往左过站）
-  let oc = targetCol + overshootDir;
-  if (oc < 0 || oc > 3) oc = targetCol - overshootDir; // 兜底
-  colSteps.push({ c: oc, delay: 280 });    // 过站第 1 格
-  // 再过一步（更慢）
-  let oc2 = oc + overshootDir;
-  if (oc2 < 0 || oc2 > 3) oc2 = oc; // 边界则停在 oc
-  if (oc2 !== oc) colSteps.push({ c: oc2, delay: 360 });
-
-  // 折返：朝 target 方向缓慢回来，速度从慢到稳
-  let cur = oc2;
-  const returnDelays = [380, 340, 300];
-  for (const d of returnDelays) {
-    if (cur > targetCol) cur--;
-    else if (cur < targetCol) cur++;
-    colSteps.push({ c: cur, delay: d });
-    if (cur === targetCol) break;
-  }
-  // 最后稳稳停在 target（确保最后一步是 targetCol）
-  if (colSteps[colSteps.length - 1].c !== targetCol) {
-    colSteps.push({ c: targetCol, delay: 420 });
+  // 过站惯性：到 target 后再走 1 步（rowEmpties 内），然后折返
+  const tPos = rowEmpties.indexOf(targetCol);
+  const overshootDir = tPos < rowEmpties.length - 1 ? 1 : -1;
+  const oIdx = tPos + overshootDir;
+  if (oIdx >= 0 && oIdx < rowEmpties.length) {
+    cellSteps.push({ c: rowEmpties[oIdx], delay: 290 });
+    // 折返
+    cellSteps.push({ c: targetCol, delay: 380 });
   } else {
-    // 把最后一步加长一点作为"咬合"
-    colSteps[colSteps.length - 1].delay = 420;
+    // 边界，没法过站就直接停 target
+    cellSteps.push({ c: targetCol, delay: 380 });
+  }
+  // 最后咬合
+  cellSteps.push({ c: targetCol, delay: 420 });
+
+  /* ===== 串行执行（三阶段：rowPhase → colPhase → cellPhase） ===== */
+  // 把每个阶段做成数组，按顺序消费
+  const phases = [];
+  if (rowSteps.length > 0) phases.push({ kind: 'row', steps: rowSteps });
+  if (colPhaseSteps.length > 0) phases.push({ kind: 'col', steps: colPhaseSteps });
+  phases.push({ kind: 'cell', steps: cellSteps });
+
+  function setColLocked(colIdx) {
+    clearAll('col-locked');
+    if (colIdx < 0) return;
+    for (let r = 0; r < 4; r++) {
+      const l = getLamp(r * 4 + colIdx);
+      if (l) l.classList.add('col-locked');
+    }
+  }
+  function highlightCol(colIdx) {
+    clearAll('spinning');
+    for (let r = 0; r < 4; r++) {
+      const l = getLamp(r * 4 + colIdx);
+      if (l) l.classList.add('spinning');
+    }
   }
 
-  /* ===== 串行执行 ===== */
-  let phase = 0; // 0 = row 阶段, 1 = col 阶段
-  let i = 0;
-
+  let pIdx = 0, sIdx = 0;
   function next() {
-    if (phase === 0) {
-      if (i >= rowSteps.length) {
-        // 进入阶段 2：把 targetRow 设为 row-locked，开始列扫描
-        clearAll('spinning');
-        setRowLocked(targetRow);
-        phase = 1;
-        i = 0;
-        setTimeout(next, 200);
-        return;
+    if (pIdx >= phases.length) {
+      // 锁定爆光
+      clearAll('spinning');
+      clearAll('row-locked');
+      clearAll('col-locked');
+      const lamp = getLamp(targetIdx);
+      if (lamp) {
+        lamp.classList.add('locking');
+        setTimeout(() => lamp.classList.remove('locking'), 480);
       }
-      const s = rowSteps[i++];
-      highlightRow(s.r);
-      setTimeout(next, s.delay);
-    } else {
-      if (i >= colSteps.length) {
-        // 锁定爆光
-        clearAll('spinning');
-        clearAll('row-locked');
-        const lamp = getLamp(targetIdx);
-        if (lamp) {
-          lamp.classList.add('locking');
-          setTimeout(() => lamp.classList.remove('locking'), 480);
-        }
-        hint.classList.remove('show');
-        setTimeout(onDone, 480);
-        return;
-      }
-      const s = colSteps[i++];
+      hint.classList.remove('show');
+      setTimeout(onDone, 480);
+      return;
+    }
+    const cur = phases[pIdx];
+    if (sIdx >= cur.steps.length) {
+      // 阶段切换：上锁 + 暂停一拍
+      clearAll('spinning');
+      if (cur.kind === 'row') setRowLocked(targetRow);
+      else if (cur.kind === 'col') setColLocked(targetCol);
+      pIdx++;
+      sIdx = 0;
+      setTimeout(next, 220);
+      return;
+    }
+    const s = cur.steps[sIdx++];
+    if (cur.kind === 'row') highlightRow(s.r);
+    else if (cur.kind === 'col') highlightCol(s.c);
+    else {
       const idx = targetRow * 4 + s.c;
       highlightCell(idx);
-      // 在列扫描时，整排保持 row-locked（除被 spinning 的那一格除外）
-      // 但 .spinning 优先级高于 .row-locked，所以不需要单独处理
-      setTimeout(next, s.delay);
     }
+    setTimeout(next, s.delay);
   }
   next();
 }
