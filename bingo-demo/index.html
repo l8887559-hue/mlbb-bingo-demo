@@ -1302,19 +1302,24 @@ function decideLightIndex(n) {
   });
 
   // 给每个 safe 候选打分。
-  // 关键策略：限制场上"差 1 子可成线"(3-of-4 ready)的线数，避免把所有空格都封死。
-  // - readyCount 已 >= 3 时，new3 转为负权（鼓励"非开新线"的延伸）
-  // - 优先选 new2（让 2-of-4 越来越多，增加视觉悬念）
-  // - 鼓励"和已有点共线"，惩罚孤立起点
+  // 优先级（从高到低）：
+  //   ★ A. 保证棋盘上点完后至少 1 条 "差 1 子可成线" 的活线（玩家刺激感的核心）
+  //   ★ B. 把现有 2 子线升级为 3 子线 / 与已有点连接（创造潜在的活线）
+  //   ★ C. 适度新增 3 子线（最多 2~3 条同时存在，太多会把所有空格封死）
+  //   D. 惩罚孤立起点
   const baseLit = LINES.map(l => litCount(l));
-  const readyNow = LINES.filter((l, li) =>
+  const baseReady = LINES.filter((l, li) =>
     baseLit[li] === 3 && !foundLines.includes(l.join(','))
   ).length;
-  const new3Weight = readyNow >= 3 ? -200 : 1000;
-  const new2Weight = readyNow >= 3 ? 80 : 50;
 
   const scored = safe.map(idx => {
     board[idx] = true;
+
+    // 点亮后的 3-of-4 活线条数
+    const afterReady = LINES.filter((l, li) =>
+      litCount(l) === 3 && !foundLines.includes(l.join(','))
+    ).length;
+
     let new3 = 0, new2 = 0, fromIsolated = 0;
     let touchExisting = false;
     LINES.forEach((l, li) => {
@@ -1327,9 +1332,34 @@ function decideLightIndex(n) {
       if (l.includes(idx) && l.some(j => j !== idx && board[j])) { touchExisting = true; break; }
     }
     board[idx] = false;
-    let score = new3 * new3Weight + new2 * new2Weight + (touchExisting ? 20 : 0) - fromIsolated * 30;
+
+    let score = 0;
+    // ★ A. 保证活线（最高优先级）
+    if (afterReady === 0) {
+      score -= 8000;            // 重罚：点完后棋盘没"差一子"线 = 体验灾难
+    } else if (afterReady === 1) {
+      score += 600;
+    } else if (afterReady === 2) {
+      score += 900;             // 最甜蜜区间：2 条活线悬念最足
+    } else if (afterReady === 3) {
+      score += 700;
+    } else {
+      // ≥4 条会把空格封死，惩罚梯度
+      score += 300 - (afterReady - 3) * 200;
+    }
+
+    // ★ B. 升级潜在线
+    score += new2 * 120;
+    if (touchExisting) score += 40;
+
+    // ★ C. 适度新增 3 子（不主导）
+    score += new3 * 250;
+
+    // D. 惩罚孤立
+    score -= fromIsolated * 40;
+
     score += Math.random();
-    return { idx, score, new3, new2 };
+    return { idx, score, afterReady, new3, new2 };
   });
 
   if (scored.length === 0) return pickRandomEmpty();
